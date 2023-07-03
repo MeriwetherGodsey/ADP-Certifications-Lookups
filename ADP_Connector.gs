@@ -30,7 +30,7 @@ function testHUListEmployees(){
       "method": "GET",
       "domain": "https://api.adp.com",
       "uri": "/hr/v2/workers?",
-      "filter": "$filter=workers/workAssignments/homeWorkLocation eq 'SSDC' and workers/workAssignments/assignmentStatus/statusCode/codeValue eq 'A'"
+      "filter": "$filter=workers/workAssignments/homeWorkLocation eq 'NA' and workers/workAssignments/assignmentStatus/statusCode/codeValue eq 'A'"
     }
   };
   var response = postAdp(data);
@@ -189,7 +189,7 @@ function lookupSingleEmployeeCertifications(aoid) {
 }
 
 function lookupOneEmployeeByAoid() {
-  var empAoid = "G35J5B7ZVZEBNXC1";
+  var empAoid = "G3EXNP0JCDSTDPJE";
   var empCerts = lookupSingleEmployeeCertifications(empAoid);
   var empData = empCerts.data.associateCertifications;
   for (i=0; i<empData.length; i++) {
@@ -255,7 +255,7 @@ function filterFPM() {
           sheet.getRange(row,7).setValue(`NEEDS`)
           // console.log(found)
           }
-        found=false;
+      found=false;
     } else {
       console.log('no cert data')
       sheet.getRange(row,7).setValue(`NEEDS`);
@@ -265,7 +265,83 @@ function filterFPM() {
 }
 
 function filterFoodHandlers() {
-  var roster = retrieveRoster();
+//   var roster = retrieveRoster();
+//   var today = new Date();
+//   const pluralize = (count, noun, suffix = 's') => `${count} ${noun}${count !== 1 ? suffix : ''}`;
+//   var fhJobDescriptions = getFhJobDescriptions();
+//   // console.log(roster);
+//   var fhEmployees = _.filter(roster.employees, (v) => _.includes(fhJobDescriptions, v.jobTitle));
+//   // console.log(fpmEmployees);
+//   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Food Handler");
+//   var lastRow = sheet.getLastRow();
+//   sheet.getRange(2,1,lastRow, 7).clearContent();
+//   var row=2;
+//   console.log(`fh Employees: ` + fhEmployees.length);
+//   for (var i=0;i<fhEmployees.length;i++) {
+//     var found = false;
+//     sheet.getRange(row,1).setValue(fhEmployees[i].name);
+//     console.log((i+1) + `/`+ fhEmployees.length + ` - ` + fhEmployees[i].name);
+//     sheet.getRange(row,2).setValue(fhEmployees[i].aoid);
+//     sheet.getRange(row,3).setValue(fhEmployees[i].account);
+//     sheet.getRange(row,4).setValue(fhEmployees[i].jobTitle);
+//     var employeeCertifications = lookupSingleEmployeeCertifications(fhEmployees[i].aoid);
+//     var employeeCertData;
+//     if (employeeCertifications.hasOwnProperty("data")) {
+//       employeeCertData = employeeCertifications.data.associateCertifications;
+//     } else {
+//       employeeCertData = {}
+//     }
+//     if (JSON.stringify(employeeCertData) !== `{}`) {
+//       for (j=0;j<employeeCertData.length;j++) {
+//         if (employeeCertData[j].hasOwnProperty("categoryCode")) {
+//           if ((employeeCertData[j].certificationNameCode.longName == `Food Protection Manager` && employeeCertData[j].categoryCode.codeValue == "C" && !found)) {
+//             sheet.getRange(row,5).setValue(employeeCertData[j].certificationNameCode.longName);
+//             sheet.getRange(row,6).setValue(employeeCertData[j].expirationDate);
+//             found = true;
+//             if (employeeCertData[j].expirationDate !== undefined) {
+//               var expDate = new Date(employeeCertData[j].expirationDate);
+//               var dateDiff = ((expDate - today) / (1000 * 60 * 60 * 24));
+//               if (dateDiff > 180) {
+//                 sheet.getRange(row,7).setValue(`Current`);  
+//               } else if (dateDiff > 0) {
+//                 sheet.getRange(row,7).setValue(`Expiring in ` + pluralize(Math.floor(dateDiff/30),`month`));  
+//               } else {
+//                 sheet.getRange(row,7).setValue(`EXPIRED`);  
+//               }
+//             } else {
+//               sheet.getRange(row,7).setValue(`NEEDSFP`);
+//             };
+//           }
+//         } else if ((employeeCertData[j].certificationNameCode.longName == `Food Handler` && employeeCertData[j].categoryCode.codeValue == "C" && !found)) {
+//           sheet.getRange(row,5).setValue(employeeCertData[j].certificationNameCode.longName);
+//             sheet.getRange(row,6).setValue(employeeCertData[j].expirationDate);
+//             found = true;
+//             if (employeeCertData[j].expirationDate !== undefined) {
+//               var expDate = new Date(employeeCertData[j].expirationDate);
+//               var dateDiff = ((expDate - today) / (1000 * 60 * 60 * 24));
+//               if (dateDiff > 180) {
+//                 sheet.getRange(row,7).setValue(`Current`);  
+//               } else if (dateDiff > 0) {
+//                 sheet.getRange(row,7).setValue(`Expiring in ` + pluralize(Math.floor(dateDiff/30),`month`));  
+//               } else {
+//                 sheet.getRange(row,7).setValue(`EXPIRED`);  
+//               }
+//             } else {
+//               sheet.getRange(row,7).setValue(`NEEDSFH`);
+//             };  
+//         } else if (employeeCertData[j].certificationNameCode.longName == `Food Handler`&& !found) {
+//           sheet.getRange(row,7).setValue(`NEEDSELSE`);
+//         };  // if FoodHandler and C(urrent) status
+//       };  //if has categoryCode
+//       if (!found) {sheet.getRange(row,7).setValue(`NEEDSNF`)}
+//     } else {
+//     console.log('no cert data')
+//     sheet.getRange(row,7).setValue(`NEEDSX`);
+//   };  // j loop
+//     row++;
+//   } // if no employeeCertData
+// } // i loop
+var roster = retrieveRoster();
   var today = new Date();
   const pluralize = (count, noun, suffix = 's') => `${count} ${noun}${count !== 1 ? suffix : ''}`;
   var fhJobDescriptions = getFhJobDescriptions();
@@ -294,7 +370,7 @@ function filterFoodHandlers() {
     if (JSON.stringify(employeeCertData) !== `{}`) {
       for (j=0;j<employeeCertData.length;j++) {
         if (employeeCertData[j].hasOwnProperty("categoryCode")) {
-          if (employeeCertData[j].certificationNameCode.longName == `Food Handler` && employeeCertData[j].categoryCode.codeValue == "C") {
+          if (employeeCertData[j].certificationNameCode.longName == `Food Protection Manager` && employeeCertData[j].categoryCode.codeValue == "C" && found == false) {
             sheet.getRange(row,5).setValue(employeeCertData[j].certificationNameCode.longName);
             sheet.getRange(row,6).setValue(employeeCertData[j].expirationDate);
             found = true;
@@ -311,7 +387,42 @@ function filterFoodHandlers() {
             } else {
               sheet.getRange(row,7).setValue(`EXPIRED`);
             };
-          }
+          } else if (employeeCertData[j].certificationNameCode.longName == `Food Handler` && employeeCertData[j].categoryCode.codeValue == "C" && found == false) {
+            sheet.getRange(row,5).setValue(employeeCertData[j].certificationNameCode.longName);
+            sheet.getRange(row,6).setValue(employeeCertData[j].expirationDate);
+            found = true;
+            if (employeeCertData[j].expirationDate !== undefined) {
+              var expDate = new Date(employeeCertData[j].expirationDate);
+              var dateDiff = ((expDate - today) / (1000 * 60 * 60 * 24));
+              if (dateDiff > 180) {
+                sheet.getRange(row,7).setValue(`Current`);  
+              } else if (dateDiff > 0) {
+                sheet.getRange(row,7).setValue(`Expiring in ` + pluralize(Math.floor(dateDiff/30),`month`));  
+              } else {
+                sheet.getRange(row,7).setValue(`EXPIRED`);  
+              }
+            } else {
+              sheet.getRange(row,7).setValue(`EXPIRED`);
+            };
+        //   } else if (employeeCertData[j].certificationNameCode.longName == `Food Safety Card` && employeeCertData[j].categoryCode.codeValue == "C" && found == false) {
+        //     sheet.getRange(row,5).setValue(employeeCertData[j].certificationNameCode.longName);
+        //     sheet.getRange(row,6).setValue(employeeCertData[j].expirationDate);
+        //     found = true;
+        //     if (employeeCertData[j].expirationDate !== undefined) {
+        //       var expDate = new Date(employeeCertData[j].expirationDate);
+        //       var dateDiff = ((expDate - today) / (1000 * 60 * 60 * 24));
+        //       if (dateDiff > 180) {
+        //         sheet.getRange(row,7).setValue(`Current`);  
+        //       } else if (dateDiff > 0) {
+        //         sheet.getRange(row,7).setValue(`Expiring in ` + pluralize(Math.floor(dateDiff/30),`month`));  
+        //       } else {
+        //         sheet.getRange(row,7).setValue(`EXPIRED`);  
+        //       }
+        //     } else {
+        //       sheet.getRange(row,7).setValue(`EXPIRED`);
+        //     };
+        //   }
+        }
         } else if (employeeCertData[j].certificationNameCode.longName == `Food Handler`) {
           sheet.getRange(row,7).setValue(`NEEDS`);
         };  // if FoodHandler and C(urrent) status
@@ -324,6 +435,7 @@ function filterFoodHandlers() {
     row++;
   } // if no employeeCertData
 } // i loop
+
 
 
 function filterAlcoholTraining() {
@@ -462,4 +574,9 @@ function testPluralize() {
   console.log(pluralize(0,`month`));
   console.log(pluralize(1,`month`));
   console.log(pluralize(2,`month`));
+}
+
+function showAllFpmJobTitles() {
+  var titles = getFPMJobDescriptions();
+  console.log(JSON.stringify(titles));
 }
