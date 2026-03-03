@@ -1,6 +1,7 @@
 'use strict';
 
 const { getBearerToken, adpGet, mapWithConcurrency } = require('./adp');
+const { notifySuccess, notifyFailure, notifyError } = require('./slack');
 const {
   ROSTER_TABLE, CERTS_TABLE,
   batchWrite, batchGet,
@@ -35,6 +36,7 @@ exports.handler = async (event) => {
     }
   } catch (err) {
     console.error(`[handler] Unhandled error in action=${action}:`, err?.message || err);
+    await notifyError(action, err);
     return { statusCode: 500, error: err?.message || 'Internal error' };
   }
 };
@@ -119,6 +121,10 @@ async function ingestRoster() {
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`[ingestRoster] Done. Wrote ${items.length} items in ${elapsed}s`);
+  await notifySuccess('ingestRoster', {
+    'Employees written': items.length,
+    'Elapsed':           `${elapsed}s`,
+  });
   return { statusCode: 200, message: 'Roster ingest complete', count: items.length, elapsed };
 }
 
@@ -210,14 +216,30 @@ async function ingestCerts() {
     await batchWrite(CERTS_TABLE, items);
   }
 
-  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(`[ingestCerts] Done. Wrote ${items.length} items. Failures=${failures.length + toRetry.length} in ${elapsed}s`);
+  const elapsed      = ((Date.now() - t0) / 1000).toFixed(1);
+  const failureCount = failures.length + toRetry.length;
+  console.log(`[ingestCerts] Done. Wrote ${items.length} items. Failures=${failureCount} in ${elapsed}s`);
+
+  if (failureCount > 0) {
+    await notifyFailure('ingestCerts', {
+      'Certs written':         items.length,
+      'Failed AOIDs':          failureCount,
+      'Elapsed':               `${elapsed}s`,
+      'Note':                  'Check CloudWatch logs for affected AOIDs',
+    });
+  } else {
+    await notifySuccess('ingestCerts', {
+      'Certs written': items.length,
+      'Failed AOIDs':  0,
+      'Elapsed':       `${elapsed}s`,
+    });
+  }
 
   return {
     statusCode: 200,
     message:    'Cert ingest complete',
     written:    items.length,
-    failures:   failures.length + toRetry.length,
+    failures:   failureCount,
     elapsed,
   };
 }
@@ -232,6 +254,9 @@ async function getRoster() {
   const items = await scanAllRoster();
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`[getRoster] Returned ${items.length} items in ${elapsed}s`);
+  if (items.length === 0) {
+    await notifyFailure('getRoster', { 'Warning': 'Returned 0 roster items — table may be empty' });
+  }
   return { statusCode: 200, employees: items, count: items.length };
 }
 
