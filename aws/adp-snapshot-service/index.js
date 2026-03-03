@@ -30,24 +30,36 @@ exports.handler = async (event) => {
     }
   }
 
+  const isHttp = !!event?.headers;
   const body   = event?.body ? JSON.parse(event.body) : event;
   const action = body?.action;
-  console.log(`[handler] action=${action}`);
+  console.log(`[handler] action=${action} isHttp=${isHttp}`);
+
+  const respond = (result) => {
+    if (isHttp) {
+      return {
+        statusCode: result.statusCode || 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(result),
+      };
+    }
+    return result;
+  };
 
   try {
     switch (action) {
-      case 'ingestRoster': return await ingestRoster();
-      case 'ingestCerts':  return await ingestCerts();
-      case 'getRoster':    return await getRoster();
-      case 'getCerts':     return await getCerts(body?.aoids);
+      case 'ingestRoster': return respond(await ingestRoster());
+      case 'ingestCerts':  return respond(await ingestCerts());
+      case 'getRoster':    return respond(await getRoster());
+      case 'getCerts':     return respond(await getCerts(body?.aoids));
       default:
         console.warn(`[handler] Unknown action: ${action}`);
-        return { statusCode: 400, error: `Unknown action: ${action}` };
+        return respond({ statusCode: 400, error: `Unknown action: ${action}` });
     }
   } catch (err) {
     console.error(`[handler] Unhandled error in action=${action}:`, err?.message || err);
     await notifyError(action, err);
-    return { statusCode: 500, error: err?.message || 'Internal error' };
+    return respond({ statusCode: 500, error: err?.message || 'Internal error' });
   }
 };
 
