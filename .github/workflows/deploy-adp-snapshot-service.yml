@@ -1,0 +1,56 @@
+name: Deploy adp-snapshot-service
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'aws/adp-snapshot-service/**'
+
+jobs:
+  deploy:
+    name: Zip and deploy to Lambda
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        working-directory: aws/adp-snapshot-service
+        run: npm ci --omit=dev
+
+      - name: Write cert from secret
+        working-directory: aws/adp-snapshot-service
+        env:
+          MG_CERT_B64: ${{ secrets.MG_CERT_B64 }}
+          MG_KEY_B64: ${{ secrets.MG_KEY_B64 }}
+        run: |
+          mkdir -p keys
+          echo "$MG_CERT_B64" | base64 --decode > "keys/Meriwether Godsey, Inc..cer"
+          echo "$MG_KEY_B64"  | base64 --decode > "keys/meriwethergodsey_auth.key"
+
+      - name: Zip deployment package
+        working-directory: aws/adp-snapshot-service
+        run: |
+          zip -r ../adp-snapshot-service.zip . \
+            --exclude "*.zip" \
+            --exclude ".gitignore"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            us-east-1
+
+      - name: Deploy to Lambda
+        run: |
+          aws lambda update-function-code \
+            --function-name adp-snapshot-service \
+            --zip-file fileb://aws/adp-snapshot-service.zip
