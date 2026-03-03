@@ -137,9 +137,9 @@ async function ingestCerts() {
     return { statusCode: 200, message: 'No AOIDs in roster — run ingestRoster first', count: 0 };
   }
 
-  const CONCURRENCY     = Number(process.env.CERT_CONCURRENCY || 6);
-  const MAX_429_RETRIES = 4;
-  const BASE_SLEEP_MS   = 800;
+  const CONCURRENCY     = Number(process.env.CERT_CONCURRENCY || 4);
+  const MAX_429_RETRIES = 6;
+  const BASE_SLEEP_MS   = 1200;
 
   // First pass
   const fetchedAt = new Date().toISOString();
