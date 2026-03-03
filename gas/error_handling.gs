@@ -1,5 +1,5 @@
 function notifySlackFromGAS(messageText) {
-  const webhookUrl = '***REMOVED***';
+  const webhookUrl = PropertiesService.getScriptProperties().getProperty('SLACK_WEBHOOK_URL');
   const payload = JSON.stringify({
     channel: "#adp_api_project",
     username: "ADP Import Notification",
