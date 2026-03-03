@@ -1,0 +1,11 @@
+# Dependencies
+**/node_modules/
+
+# mTLS keys — never commit
+**/keys/
+
+# Build artifacts
+**/*.zip
+
+# macOS
+.DS_Store

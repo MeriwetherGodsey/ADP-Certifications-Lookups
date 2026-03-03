@@ -1,0 +1,15 @@
+{
+  "name": "adp-snapshot-service",
+  "version": "1.0.0",
+  "description": "ADP roster and certification snapshot service — fetches from ADP, stores in DynamoDB",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3",
+    "@aws-sdk/lib-dynamodb": "^3",
+    "@aws-sdk/client-ssm": "^3",
+    "axios": "^1"
+  }
+}
