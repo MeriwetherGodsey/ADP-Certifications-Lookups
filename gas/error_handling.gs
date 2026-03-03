@@ -341,7 +341,6 @@ function processEmployeeCertifications(employees, sheetName, certNames) {
 
     // Tunables
     const BATCH_SIZE = 25;
-    const LAMBDA_CONCURRENCY = 4;   // keep modest to reduce 429 risk
     const BATCH_SLEEP_MS = 150;     // smooth bursts between batches
 
     console.log(`${sheetName}: employees input count=${employees.length}`);
@@ -356,7 +355,7 @@ function processEmployeeCertifications(employees, sheetName, certNames) {
       console.log(`${sheetName}: processing ${startIdx}-${endIdx} of ${employees.length}`);
 
       // Map keyed by AOID: { statusCode, data:{associateCertifications:[]}, error }
-      const certMap = lookupCertificationsForEmployeesBatch_(batchEmployees, LAMBDA_CONCURRENCY) || {};
+      const certMap = lookupCertificationsForEmployeesBatch_(batchEmployees) || {};
 
       for (let i = 0; i < batchEmployees.length; i++) {
         const emp = batchEmployees[i];
@@ -500,89 +499,43 @@ function processEmployeeCertifications(employees, sheetName, certNames) {
  *
  *     NOTE: This uses your existing postAdpWithRetries() and does not affect other callers.
  *  ========================= */
-function lookupCertificationsForEmployeesBatch_(employees, lambdaConcurrency) {
+function lookupCertificationsForEmployeesBatch_(employees) {
   const normAoid = (v) => decodeURIComponent(String(v ?? "")).trim();
-  const buildUri = (aoid) => `/talent/v2/associates/${encodeURIComponent(aoid)}/associate-certifications`;
 
-  // Config
-  const CONC = Math.max(1, Number(lambdaConcurrency || 4)); // default LOWERED
-  const MAX_429_RETRIES = 4;  // per-AOID retry rounds
-  const BASE_SLEEP_MS = 800;  // base backoff
-
-  // Map: aoid => { statusCode, data:{associateCertifications:[]}, error? }
+  // Build initial map with empty defaults
   const map = {};
+  const aoids = [];
   for (let i = 0; i < employees.length; i++) {
     const aoid = normAoid(employees[i].aoid);
     map[aoid] = { statusCode: 0, data: { associateCertifications: [] }, error: null };
+    aoids.push(aoid);
   }
 
-  // Helper: call Lambda batch endpoint for a list of URIs
-  const fetchBatch_ = (uris) => {
-    const payload = {
-      data: {
-        method: "GET",
-        domain: "https://accounts.adp.com",
-        uris: uris,
-        concurrency: CONC
-      }
+  // Single call to snapshot service — all batching/retry is handled server-side
+  const result = postSnapshot({ action: 'getCerts', aoids: aoids });
+
+  if (!result || !Array.isArray(result.certs)) {
+    console.warn('lookupCertificationsForEmployeesBatch_: no certs returned from snapshot service');
+    return map;
+  }
+
+  // Normalize compact DynamoDB format back to { statusCode, data:{associateCertifications:[]} }
+  for (let i = 0; i < result.certs.length; i++) {
+    const entry = result.certs[i];
+    const aoid  = normAoid(entry.aoid || '');
+    if (!aoid || !map[aoid]) continue;
+
+    const certifications = (entry.certs || []).map(c => ({
+      certificationNameCode: { longName: c.n || '' },
+      expirationDate:        c.e || '',
+      categoryCode:          { codeValue: c.c || '' },
+    }));
+
+    map[aoid] = {
+      statusCode: 200,
+      data: { associateCertifications: certifications },
+      error: null,
     };
-    return postAdpWithRetries(payload);
-  };
-
-  // Helper: apply results into map and return list of AOIDs that got 429
-  const applyResults_ = (response) => {
-    const rateLimitedAoids = [];
-
-    if (!response || response.statusCode !== 200 || !Array.isArray(response.results)) {
-      console.warn(`Batch certifications lookup failed (outer).`);
-      return rateLimitedAoids;
-    }
-
-    for (let r = 0; r < response.results.length; r++) {
-      const item = response.results[r];
-      const uri = item?.uri || "";
-
-      const match = uri.match(/\/associates\/([^/]+)\/associate-certifications/);
-      const aoid = match ? normAoid(match[1]) : null;
-      if (!aoid) continue;
-
-      const sc = Number(item?.statusCode ?? 0);
-
-      if (sc === 200 && item.data && Array.isArray(item.data.associateCertifications)) {
-        map[aoid] = { statusCode: 200, data: item.data, error: null };
-      } else {
-        // Preserve error body if present
-        map[aoid] = {
-          statusCode: sc,
-          data: { associateCertifications: [] },
-          error: item?.data || null
-        };
-
-        if (sc === 429) rateLimitedAoids.push(aoid);
-      }
-    }
-
-    return rateLimitedAoids;
-  };
-
-  // ---- 1) initial fetch for all employees ----
-  const allAoids = Object.keys(map);
-  const initialUris = allAoids.map(buildUri);
-  const initialResponse = fetchBatch_(initialUris);
-  let rateLimited = applyResults_(initialResponse);
-
-  // ---- 2) retry loop for only 429s ----
-  for (let attempt = 1; attempt <= MAX_429_RETRIES && rateLimited.length > 0; attempt++) {
-    // exponential-ish backoff with jitter
-    const jitter = Math.floor(Math.random() * 250);
-    const sleepMs = (BASE_SLEEP_MS * Math.pow(2, attempt - 1)) + jitter;
-
-    console.log(`Retrying ${rateLimited.length} rate-limited certification lookups (attempt ${attempt}/${MAX_429_RETRIES}) after ${sleepMs}ms...`);
-    Utilities.sleep(sleepMs);
-
-    const retryUris = rateLimited.map(buildUri);
-    const retryResponse = fetchBatch_(retryUris);
-    rateLimited = applyResults_(retryResponse);
   }
 
   return map;
