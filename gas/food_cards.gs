@@ -416,51 +416,10 @@ function getNAFoodCardCerts() {
   var roster = retrieveRoster();
   var naFoodCardJobDescriptions = getRegionalDataByFilter('NA Food Card');
   var naCrew = _.filter(roster.employees, { "account": "NA" });
-  var naFoodCardCrew = _.filter(naCrew, (v) => _.includes(naFoodCardJobDescriptions, v.jobTitle));
-  var naEmployees = naFoodCardCrew;
-
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Norfolk Food Cards");
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(2, 1, lastRow, 7).clearContent();
-
-  var row = 2;
+  var naEmployees = _.filter(naCrew, (v) => _.includes(naFoodCardJobDescriptions, v.jobTitle));
   console.log(`NA Employees: ` + naEmployees.length);
-
-  for (var i = 0; i < naEmployees.length; i++) {
-    var found = false;
-    var emp = naEmployees[i];
-    console.log((i + 1) + `/` + naEmployees.length + ` - ` + emp.name);
-
-    sheet.getRange(row, 1).setValue(emp.name);
-    sheet.getRange(row, 2).setValue(emp.aoid);
-    sheet.getRange(row, 3).setValue(emp.account);
-    sheet.getRange(row, 4).setValue(emp.jobTitle);
-
-    var certs = lookupSingleEmployeeCertifications(emp.aoid);
-    var certData = certs.data?.associateCertifications || [];
-
-    for (var j = 0; j < certData.length; j++) {
-      var cert = certData[j];
-      if (cert.categoryCode?.codeValue === "C" && !found) {
-        var name = cert.certificationNameCode.longName;
-        var expDate = cert.expirationDate;
-
-        if (name === "Food Protection Manager" || name === "Norfolk Food Safety Card") {
-          sheet.getRange(row, 5).setValue(name);
-          sheet.getRange(row, 6).setValue(expDate);
-          sheet.getRange(row, 7).setValue(getCertificationStatus(expDate));
-          found = true;
-        }
-      }
-    }
-
-    if (!found) {
-      sheet.getRange(row, 5).setValue("Norfolk Food Safety Card");
-      sheet.getRange(row, 7).setValue("EXPIRED");
-    }
-
-    row++;
-  }
+  writeFoodCardSheet_('Norfolk Food Cards', naEmployees,
+    ['Food Protection Manager', 'Norfolk Food Safety Card'], 'Norfolk Food Safety Card');
 }
 
 function getMocoFoodCardCerts() {
@@ -468,54 +427,14 @@ function getMocoFoodCardCerts() {
   var fpmJobDescriptions = getJobDescriptionsByCategory('FPM');
   var mocoAccounts = getRegionalDataByFilter('Moco Accounts');
   var fpmEmployees = _.filter(roster.employees, (v) => _.includes(fpmJobDescriptions, v.jobTitle));
-  var mocoFpmEployees = _.filter(fpmEmployees, (v) => _.includes(mocoAccounts, v.account));
+  var mocoFpmEmployees = _.filter(fpmEmployees, (v) => _.includes(mocoAccounts, v.account));
   var sflsSupportJobDescriptions = getRegionalDataByFilter('SFLS Support');
   var sflsSupportEmployees = _.filter(roster.employees, (v) => _.includes(sflsSupportJobDescriptions, v.jobTitle));
-  var sflsSupport = _.filter(sflsSupportEmployees, { "account": "SFUS" });
-
-  var mocoFoodCardEmployees = _.concat(mocoFpmEployees, sflsSupport);
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MoCo MD Food Cards");
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(2, 1, lastRow, 7).clearContent();
-
-  var row = 2;
+  var sflsSupport = _.filter(sflsSupportEmployees, { 'account': 'SFUS' });
+  var mocoFoodCardEmployees = _.concat(mocoFpmEmployees, sflsSupport);
   console.log(`MoCo FoodCard Employees: ` + mocoFoodCardEmployees.length);
-
-  for (var i = 0; i < mocoFoodCardEmployees.length; i++) {
-    var found = false;
-    var emp = mocoFoodCardEmployees[i];
-    console.log((i + 1) + `/` + mocoFoodCardEmployees.length + ` - ` + emp.name);
-
-    sheet.getRange(row, 1).setValue(emp.name);
-    sheet.getRange(row, 2).setValue(emp.aoid);
-    sheet.getRange(row, 3).setValue(emp.account);
-    sheet.getRange(row, 4).setValue(emp.jobTitle);
-
-    var certs = lookupSingleEmployeeCertifications(emp.aoid);
-    var certData = certs.data?.associateCertifications || [];
-
-    for (var j = 0; j < certData.length; j++) {
-      var cert = certData[j];
-      if (cert.categoryCode?.codeValue === "C" && !found) {
-        var name = cert.certificationNameCode.longName;
-        var expDate = cert.expirationDate;
-
-        if (name === "Montgomery Co MD- Food Safety Card") {
-          sheet.getRange(row, 5).setValue(name);
-          sheet.getRange(row, 6).setValue(expDate);
-          sheet.getRange(row, 7).setValue(getCertificationStatus(expDate));
-          found = true;
-        }
-      }
-    }
-
-    if (!found) {
-      sheet.getRange(row, 5).setValue("Montgomery Co MD- Food Safety Card");
-      sheet.getRange(row, 7).setValue("EXPIRED");
-    }
-
-    row++;
-  }
+  writeFoodCardSheet_('MoCo MD Food Cards', mocoFoodCardEmployees,
+    ['Montgomery Co MD- Food Safety Card'], 'Montgomery Co MD- Food Safety Card');
 }
 
 function getDCFoodCardCerts() {
@@ -523,51 +442,10 @@ function getDCFoodCardCerts() {
   var fpmJobDescriptions = getJobDescriptionsByCategory('FPM');
   var dcAccounts = getRegionalDataByFilter('DC Accounts');
   var fpmEmployees = _.filter(roster.employees, (v) => _.includes(fpmJobDescriptions, v.jobTitle));
-  var dcFpmEployees = _.filter(fpmEmployees, (v) => _.includes(dcAccounts, v.account));
-  var dcFoodCardEmployees = dcFpmEployees;
-
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("DC Food Cards");
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(2, 1, lastRow, 7).clearContent();
-
-  var row = 2;
+  var dcFoodCardEmployees = _.filter(fpmEmployees, (v) => _.includes(dcAccounts, v.account));
   console.log(`DC FoodCard Employees: ` + dcFoodCardEmployees.length);
-
-  for (var i = 0; i < dcFoodCardEmployees.length; i++) {
-    var found = false;
-    var emp = dcFoodCardEmployees[i];
-    console.log((i + 1) + `/` + dcFoodCardEmployees.length + ` - ` + emp.name);
-
-    sheet.getRange(row, 1).setValue(emp.name);
-    sheet.getRange(row, 2).setValue(emp.aoid);
-    sheet.getRange(row, 3).setValue(emp.account);
-    sheet.getRange(row, 4).setValue(emp.jobTitle);
-
-    var certs = lookupSingleEmployeeCertifications(emp.aoid);
-    var certData = certs.data?.associateCertifications || [];
-
-    for (var j = 0; j < certData.length; j++) {
-      var cert = certData[j];
-      if (cert.categoryCode?.codeValue === "C" && !found) {
-        var name = cert.certificationNameCode.longName;
-        var expDate = cert.expirationDate;
-
-        if (name === "DC Food Safety Card") {
-          sheet.getRange(row, 5).setValue(name);
-          sheet.getRange(row, 6).setValue(expDate);
-          sheet.getRange(row, 7).setValue(getCertificationStatus(expDate));
-          found = true;
-        }
-      }
-    }
-
-    if (!found) {
-      sheet.getRange(row, 5).setValue("DC Food Safety Card");
-      sheet.getRange(row, 7).setValue("EXPIRED");
-    }
-
-    row++;
-  }
+  writeFoodCardSheet_('DC Food Cards', dcFoodCardEmployees,
+    ['DC Food Safety Card'], 'DC Food Safety Card');
 }
 
 function getMocoPaFoodCardCerts() {
@@ -575,51 +453,10 @@ function getMocoPaFoodCardCerts() {
   var fpmJobDescriptions = getJobDescriptionsByCategory('FPM');
   var mocoPaAccounts = getRegionalDataByFilter('MCPA Accounts');
   var fpmEmployees = _.filter(roster.employees, (v) => _.includes(fpmJobDescriptions, v.jobTitle));
-  var mcpaFpmEployees = _.filter(fpmEmployees, (v) => _.includes(mocoPaAccounts, v.account));
-  var mocoPaFoodCardEmployees = mcpaFpmEployees;
-
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MoCo PA Food Cards");
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(2, 1, lastRow, 7).clearContent();
-
-  var row = 2;
-  console.log(`MoCoPa FoodCard Employees: ` + mocoPaFoodCardEmployees.length);
-
-  for (var i = 0; i < mocoPaFoodCardEmployees.length; i++) {
-    var found = false;
-    var emp = mocoPaFoodCardEmployees[i];
-    console.log((i + 1) + `/` + mocoPaFoodCardEmployees.length + ` - ` + emp.name);
-
-    sheet.getRange(row, 1).setValue(emp.name);
-    sheet.getRange(row, 2).setValue(emp.aoid);
-    sheet.getRange(row, 3).setValue(emp.account);
-    sheet.getRange(row, 4).setValue(emp.jobTitle);
-
-    var certs = lookupSingleEmployeeCertifications(emp.aoid);
-    var certData = certs.data?.associateCertifications || [];
-
-    for (var j = 0; j < certData.length; j++) {
-      var cert = certData[j];
-      if (cert.categoryCode?.codeValue === "C" && !found) {
-        var name = cert.certificationNameCode.longName;
-        var expDate = cert.expirationDate;
-
-        if (name === "Montgomery County PA - Food Safety Card") {
-          sheet.getRange(row, 5).setValue(name);
-          sheet.getRange(row, 6).setValue(expDate);
-          sheet.getRange(row, 7).setValue(getCertificationStatus(expDate));
-          found = true;
-        }
-      }
-    }
-
-    if (!found) {
-      sheet.getRange(row, 5).setValue("Montgomery County PA - Food Safety Card");
-      sheet.getRange(row, 7).setValue("EXPIRED");
-    }
-
-    row++;
-  }
+  var mocoPaFoodCardEmployees = _.filter(fpmEmployees, (v) => _.includes(mocoPaAccounts, v.account));
+  console.log(`MoCo PA FoodCard Employees: ` + mocoPaFoodCardEmployees.length);
+  writeFoodCardSheet_('MoCo PA Food Cards', mocoPaFoodCardEmployees,
+    ['Montgomery County PA - Food Safety Card'], 'Montgomery County PA - Food Safety Card');
 }
 
 function getPhiladelphiaFoodCardCerts() {
@@ -627,49 +464,52 @@ function getPhiladelphiaFoodCardCerts() {
   var fpmJobDescriptions = getJobDescriptionsByCategory('FPM');
   var philadephiaAccounts = getRegionalDataByFilter('Philadelphia Accounts');
   var fpmEmployees = _.filter(roster.employees, (v) => _.includes(fpmJobDescriptions, v.jobTitle));
-  var philadelphiaFpmEployees = _.filter(fpmEmployees, (v) => _.includes(philadephiaAccounts, v.account));
-  var philadelphiaFoodCardEmployees = philadelphiaFpmEployees;
-
-  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("Philadelphia Food Cards");
-  var lastRow = sheet.getLastRow();
-  sheet.getRange(2, 1, lastRow, 7).clearContent();
-
-  var row = 2;
+  var philadelphiaFoodCardEmployees = _.filter(fpmEmployees, (v) => _.includes(philadephiaAccounts, v.account));
   console.log(`Philadelphia FoodCard Employees: ` + philadelphiaFoodCardEmployees.length);
+  writeFoodCardSheet_('Philadelphia Food Cards', philadelphiaFoodCardEmployees,
+    ['City of Philadelphia Food Card'], 'City of Philadelphia Food Card');
+}
 
-  for (var i = 0; i < philadelphiaFoodCardEmployees.length; i++) {
-    var found = false;
-    var emp = philadelphiaFoodCardEmployees[i];
-    console.log((i + 1) + `/` + philadelphiaFoodCardEmployees.length + ` - ` + emp.name);
+/** =========================
+ *  Shared food card sheet writer
+ *  employees: array of { name, aoid, account, jobTitle }
+ *  certNames: array of cert longNames to match
+ *  defaultCertLabel: shown in col E when no cert found
+ *  ========================= */
+function writeFoodCardSheet_(sheetName, employees, certNames, defaultCertLabel) {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(sheetName);
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 7).clearContent();
+  if (!employees.length) return;
 
-    sheet.getRange(row, 1).setValue(emp.name);
-    sheet.getRange(row, 2).setValue(emp.aoid);
-    sheet.getRange(row, 3).setValue(emp.account);
-    sheet.getRange(row, 4).setValue(emp.jobTitle);
+  var certNameSet = new Set(certNames);
+  var certMap = lookupCertificationsForEmployeesBatch_(employees);
+  var normAoid = (v) => decodeURIComponent(String(v || '')).trim();
 
-    var certs = lookupSingleEmployeeCertifications(emp.aoid);
-    var certData = certs.data?.associateCertifications || [];
+  var output = employees.map(function(emp) {
+    var aoid    = normAoid(emp.aoid);
+    var entry   = certMap[aoid];
+    var certData = entry && entry.statusCode === 200
+      ? (entry.data.associateCertifications || []) : [];
+
+    var certName = defaultCertLabel;
+    var expDate  = '';
+    var status   = 'EXPIRED';
 
     for (var j = 0; j < certData.length; j++) {
       var cert = certData[j];
-      if (cert.categoryCode?.codeValue === "C" && !found) {
-        var name = cert.certificationNameCode.longName;
-        var expDate = cert.expirationDate;
-
-        if (name === "City of Philadelphia Food Card") {
-          sheet.getRange(row, 5).setValue(name);
-          sheet.getRange(row, 6).setValue(expDate);
-          sheet.getRange(row, 7).setValue(getCertificationStatus(expDate));
-          found = true;
-        }
+      if (cert.categoryCode && cert.categoryCode.codeValue === 'C' &&
+          certNameSet.has(cert.certificationNameCode.longName)) {
+        certName = cert.certificationNameCode.longName;
+        expDate  = cert.expirationDate || '';
+        status   = getCertificationStatus(expDate);
+        break;
       }
     }
 
-    if (!found) {
-      sheet.getRange(row, 5).setValue("City of Philadelphia Food Card");
-      sheet.getRange(row, 7).setValue("EXPIRED");
-    }
+    return [emp.name || '', aoid, emp.account || '', emp.jobTitle || '', certName, expDate, status];
+  });
 
-    row++;
-  }
+  output.sort(function(a, b) { return String(a[0]).localeCompare(String(b[0])); });
+  sheet.getRange(2, 1, output.length, 7).setValues(output);
 }
