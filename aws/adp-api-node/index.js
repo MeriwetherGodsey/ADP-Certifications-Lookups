@@ -24,8 +24,7 @@ const httpsAgent = new https.Agent({
  *  ======================= */
 const CREDS_URL = 'https://accounts.adp.com/auth/oauth/v2/token?grant_type=client_credentials';
 
-// TODO: move to Secrets Manager / env var
-const BASIC_AUTH = 'Basic ***REMOVED***=';
+const BASIC_AUTH = process.env.ADP_BASIC_AUTH;
 
 const OAUTH_HEADERS = {
   Authorization: BASIC_AUTH,
