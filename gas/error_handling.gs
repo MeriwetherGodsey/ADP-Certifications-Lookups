@@ -451,7 +451,8 @@ function processEmployeeCertifications(employees, sheetName, certNames) {
       Utilities.sleep(BATCH_SLEEP_MS);
     }
 
-    // Write once
+    // Write once — sorted by employee name (col A)
+    output.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
     if (output.length) {
       sheet.getRange(2, 1, output.length, 7).setValues(output);
     }
