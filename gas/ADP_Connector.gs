@@ -263,6 +263,9 @@ function allActiveEmployees() {
     });
   }
 
+  rows.sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  roster.employees.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
   if (rows.length) {
     sheet.getRange(2, 1, rows.length, 9).setValues(rows);
   }
