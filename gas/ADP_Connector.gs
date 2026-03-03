@@ -39,6 +39,26 @@ function postAdp(data) {
   return content;
 }
 
+function postSnapshot(payload) {
+  const props = PropertiesService.getScriptProperties();
+  const SNAPSHOT_URL = props.getProperty('SNAPSHOT_LAMBDA_URL');
+  const secret       = props.getProperty('SNAPSHOT_LAMBDA_SECRET');
+  const options = {
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify(payload),
+    headers: { 'x-adp-secret': secret || '' },
+    muteHttpExceptions: true,
+  };
+  const response = UrlFetchApp.fetch(SNAPSHOT_URL, options);
+  const code = response.getResponseCode();
+  if (code !== 200) {
+    console.warn(`postSnapshot HTTP ${code}: ${response.getContentText().slice(0, 200)}`);
+    return null;
+  }
+  return JSON.parse(response.getContentText());
+}
+
 function testHUListEmployees() {
   var data = {
     "data": {
@@ -203,194 +223,52 @@ function testValidationTables() {
 //   console.log(`allActiveEmployees done in ${(Date.now() - t0) / 1000}s`);
 // }
 function allActiveEmployees() {
+  const t0 = Date.now();
   const roster = { employees: [] };
 
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const sheet = ss.getSheetByName("Roster");
-
-  // Clear old content (fix range height)
+  const sheet = ss.getSheetByName('Roster');
   const lastRow = sheet.getLastRow();
   if (lastRow > 1) sheet.getRange(2, 1, lastRow - 1, 9).clearContent();
 
-  const TOP = 100;
-  let skip = 0;
-  let totalCount = null;
-
-  const rows = []; // 2D array for sheet output (A:I)
-
-  // ---------- NAME BUILDER (robust, keeps "Last, First") ----------
-  function buildWorkerDisplayName_(w) {
-    const legal = w?.person?.legalName || {};
-    const preferred = w?.person?.preferredName || {};
-
-    const pick = (...vals) => {
-      for (const v of vals) {
-        const s = String(v ?? "").trim();
-        if (s) return s;
-      }
-      return "";
-    };
-
-    // Most reliable pieces
-    const family = pick(preferred.familyName1, legal.familyName1);
-
-    // "First" candidate: prefer givenName, then nickName
-    const first = pick(
-      preferred.givenName,
-      legal.givenName,
-      preferred.nickName,
-      legal.nickName
-    );
-
-    // Some payloads include a formatted name (if present, we can use it when needed)
-    const formatted = pick(
-      preferred.formattedName,
-      legal.formattedName,
-      preferred.fullName,
-      legal.fullName
-    );
-
-    // Primary desired output: "Last, First"
-    if (family && first) return `${family}, ${first}`;
-
-    // If no first but we have a formatted full name, use it (better than "Last," )
-    if (formatted) return formatted;
-
-    // Next fallback: just family (no comma)
-    if (family) return family;
-
-    // Final fallback: if first exists but family doesn't
-    if (first) return first;
-
-    return "";
-  }
-  // ---------------------------------------------------------------
-
-  // Helper to call ADP workers endpoint
-  const fetchWorkersPage_ = (skipVal, includeCount) => {
-    const uri = includeCount
-      ? `/hr/v2/workers?count=true&$top=${TOP}&$skip=${skipVal}`
-      : `/hr/v2/workers?$top=${TOP}&$skip=${skipVal}`;
-
-    const data = {
-      data: {
-        method: "GET",
-        domain: "https://api.adp.com",
-        uri: uri,
-        // If ADP filtering works for you, turn this on to reduce payload:
-        // filter: "$filter=workers/workAssignments/assignmentStatus/statusCode/codeValue eq 'A'"
-      }
-    };
-
-    return postAdp(data); // keep your existing proxy call
-  };
-
-  const t0 = Date.now();
-  let pageNum = 0;
-
-  while (true) {
-    pageNum++;
-    const response = fetchWorkersPage_(skip, pageNum === 1); // only ask for count on page 1
-    if (!response || !response.data) {
-      console.warn(`No response/data from ADP at skip=${skip}. Stopping.`);
-      break;
-    }
-
-    if (pageNum === 1) {
-      totalCount = response.data?.meta?.totalNumber ?? null;
-      console.log(`totalCount = ${totalCount}`);
-    }
-
-    const workers = response.data.workers || [];
-    if (workers.length === 0) {
-      console.log(`No workers returned at skip=${skip}. Done.`);
-      break;
-    }
-
-    // Build rows + roster objects in memory
-    for (let i = 0; i < workers.length; i++) {
-      const w = workers[i];
-      const aoid = w.associateOID || "";
-
-      const name = buildWorkerDisplayName_(w);
-
-      // Helpful logging for edge cases (e.g., "Fouts" only)
-      if (aoid && name && !String(name).includes(",")) {
-        // This means we didn't have enough to form "Last, First"
-        // (not necessarily wrong, but worth inspecting)
-        console.log(
-          `⚠️ Name missing first/given/nick for aoid=${aoid}. Built name="${name}". ` +
-          `legal.family="${String(w?.person?.legalName?.familyName1 || "")}" ` +
-          `legal.given="${String(w?.person?.legalName?.givenName || "")}" ` +
-          `legal.nick="${String(w?.person?.legalName?.nickName || "")}" ` +
-          `pref.given="${String(w?.person?.preferredName?.givenName || "")}" ` +
-          `pref.nick="${String(w?.person?.preferredName?.nickName || "")}"`
-        );
-      }
-
-      const associateId = w?.workerID?.idValue || "";
-      const originalHireDate = w?.workerDates?.originalHireDate || "";
-
-      const assignments = w.workAssignments || [];
-      for (let j = 0; j < assignments.length; j++) {
-        const a = assignments[j];
-        const status = a?.assignmentStatus?.statusCode?.codeValue;
-
-        // Only include active assignments with homeWorkLocation
-        const acct = a?.homeWorkLocation?.nameCode?.codeValue;
-        if (!acct) continue;
-        if (status !== "A") continue;
-
-        const jobTitle = a?.jobTitle || "";
-        const positionId = a?.positionID || "";
-        const positionStartDate = a?.actualStartDate || "";
-
-        // Sheet row A:I
-        rows.push([
-          name,
-          aoid,
-          acct,
-          j,                 // assignment index
-          jobTitle,
-          positionId,
-          associateId,
-          originalHireDate,
-          positionStartDate
-        ]);
-
-        // Roster object
-        roster.employees.push({
-          name,
-          aoid,
-          account: acct,
-          jobTitle,
-          associateId,
-          originalHireDate,
-          positionStartDate
-        });
-      }
-    }
-
-    // Pagination control
-    skip += TOP;
-
-    // If ADP told us the total, we can stop once we’ve fetched all pages
-    if (totalCount != null && skip >= totalCount) break;
-
-    // Otherwise stop when last page returned fewer than TOP workers
-    if (workers.length < TOP) break;
+  const result = postSnapshot({ action: 'getRoster' });
+  if (!result || !Array.isArray(result.employees)) {
+    console.error('allActiveEmployees: failed to get roster from snapshot service');
+    notifySlackFromGAS(':rotating_light: *allActiveEmployees* failed — could not fetch roster from snapshot service');
+    return;
   }
 
-  // One sheet write
+  const rows = [];
+  for (let i = 0; i < result.employees.length; i++) {
+    const emp = result.employees[i];
+    rows.push([
+      emp.name           || '',
+      emp.aoid           || '',
+      emp.account        || '',
+      emp.assignmentIdx  || 0,
+      emp.jobTitle       || '',
+      emp.positionId     || '',
+      emp.associateId    || '',
+      emp.originalHireDate   || '',
+      emp.positionStartDate  || '',
+    ]);
+    roster.employees.push({
+      name:             emp.name        || '',
+      aoid:             emp.aoid        || '',
+      account:          emp.account     || '',
+      jobTitle:         emp.jobTitle    || '',
+      associateId:      emp.associateId || '',
+      originalHireDate: emp.originalHireDate  || '',
+      positionStartDate:emp.positionStartDate || '',
+    });
+  }
+
   if (rows.length) {
     sheet.getRange(2, 1, rows.length, 9).setValues(rows);
   }
 
-  // Persist roster for other scripts
-  PropertiesService.getScriptProperties().setProperty("roster", JSON.stringify(roster));
-
-  console.log(`Roster built: ${roster.employees.length} active assignments written.`);
-  console.log(`allActiveEmployees done in ${(Date.now() - t0) / 1000}s`);
+  PropertiesService.getScriptProperties().setProperty('roster', JSON.stringify(roster));
+  console.log(`Roster built: ${roster.employees.length} employees in ${(Date.now() - t0) / 1000}s`);
 }
 
 
@@ -422,21 +300,16 @@ function filterHU() {
 // }
 
 function lookupSingleEmployeeCertifications(aoid) {
-  const data = {
-    "data": {
-      "method": "GET",
-      "domain": "https://accounts.adp.com",
-      "uri": `/talent/v2/associates/${aoid}/associate-certifications`
-    }
-  };
-
-  const response = postAdpWithRetries(data);
-
-  if (response && response.data && Array.isArray(response.data.associateCertifications)) {
-    return response;
+  const result = postSnapshot({ action: 'getCerts', aoids: [aoid] });
+  if (result && Array.isArray(result.certs) && result.certs.length > 0) {
+    const entry = result.certs[0];
+    const certifications = (entry.certs || []).map(c => ({
+      certificationNameCode: { longName: c.n || '' },
+      expirationDate: c.e || '',
+      categoryCode: { codeValue: c.c || '' },
+    }));
+    return { data: { associateCertifications: certifications } };
   }
-
-  // Fallback in case of failure
   console.warn(`Certifications unavailable for AOID: ${aoid}`);
   return { data: { associateCertifications: [] } };
 }

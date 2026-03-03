@@ -21,7 +21,17 @@ const {
  *  GAS calls should POST { "action": "getRoster" } or { "action": "getCerts", "aoids": [...] }
  *  ======================= */
 exports.handler = async (event) => {
-  const action = event?.action;
+  // Shared secret check for Function URL calls (EventBridge bypasses this — no headers)
+  if (event?.headers) {
+    const expected = process.env.FUNCTION_URL_SECRET;
+    const provided = event?.headers?.['x-adp-secret'];
+    if (expected && provided !== expected) {
+      return { statusCode: 401, error: 'Unauthorized' };
+    }
+  }
+
+  const body   = event?.body ? JSON.parse(event.body) : event;
+  const action = body?.action;
   console.log(`[handler] action=${action}`);
 
   try {
@@ -29,7 +39,7 @@ exports.handler = async (event) => {
       case 'ingestRoster': return await ingestRoster();
       case 'ingestCerts':  return await ingestCerts();
       case 'getRoster':    return await getRoster();
-      case 'getCerts':     return await getCerts(event?.aoids);
+      case 'getCerts':     return await getCerts(body?.aoids);
       default:
         console.warn(`[handler] Unknown action: ${action}`);
         return { statusCode: 400, error: `Unknown action: ${action}` };
