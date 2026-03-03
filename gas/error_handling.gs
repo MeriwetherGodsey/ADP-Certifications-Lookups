@@ -514,24 +514,26 @@ function lookupCertificationsForEmployeesBatch_(employees) {
   // Single call to snapshot service — all batching/retry is handled server-side
   const result = postSnapshot({ action: 'getCerts', aoids: aoids });
 
-  if (!result || !Array.isArray(result.certs)) {
+  if (!result || !result.certs || typeof result.certs !== 'object') {
     console.warn('lookupCertificationsForEmployeesBatch_: no certs returned from snapshot service');
     return map;
   }
 
   // Normalize compact DynamoDB format back to { statusCode, data:{associateCertifications:[]} }
-  for (let i = 0; i < result.certs.length; i++) {
-    const entry = result.certs[i];
-    const aoid  = normAoid(entry.aoid || '');
-    if (!aoid || !map[aoid]) continue;
+  // result.certs is an object keyed by aoid: { [aoid]: { aoid, certs:[{n,e,c},...] } }
+  const certsMap = result.certs;
+  for (const aoid in certsMap) {
+    const normKey = normAoid(aoid);
+    if (!normKey || !map[normKey]) continue;
 
+    const entry = certsMap[aoid];
     const certifications = (entry.certs || []).map(c => ({
       certificationNameCode: { longName: c.n || '' },
       expirationDate:        c.e || '',
       categoryCode:          { codeValue: c.c || '' },
     }));
 
-    map[aoid] = {
+    map[normKey] = {
       statusCode: 200,
       data: { associateCertifications: certifications },
       error: null,
