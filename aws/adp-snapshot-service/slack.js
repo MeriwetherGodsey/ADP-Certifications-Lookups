@@ -2,9 +2,7 @@
 
 const axios = require('axios');
 
-const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL ||
-  '***REMOVED***';
-
+const WEBHOOK_URL = process.env.SLACK_WEBHOOK_URL;
 const CHANNEL  = '#adp_api_project';
 const USERNAME = 'ADP Snapshot Service';
 
