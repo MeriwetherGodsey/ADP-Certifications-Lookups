@@ -304,14 +304,19 @@ function filterHU() {
 
 function lookupSingleEmployeeCertifications(aoid) {
   const result = postSnapshot({ action: 'getCerts', aoids: [aoid] });
-  if (result && Array.isArray(result.certs) && result.certs.length > 0) {
-    const entry = result.certs[0];
-    const certifications = (entry.certs || []).map(c => ({
-      certificationNameCode: { longName: c.n || '' },
-      expirationDate: c.e || '',
-      categoryCode: { codeValue: c.c || '' },
-    }));
-    return { data: { associateCertifications: certifications } };
+  // getCerts returns { certs: { "<aoid>": [...] } } — object keyed by AOID
+  if (result && result.certs && typeof result.certs === 'object') {
+    const normAoid = (v) => decodeURIComponent(String(v || '')).trim();
+    const key = Object.keys(result.certs).find(k => normAoid(k) === normAoid(aoid));
+    if (key !== undefined) {
+      const raw = result.certs[key] || [];
+      const certifications = raw.map(c => ({
+        certificationNameCode: { longName: c.n || '' },
+        expirationDate: c.e || '',
+        categoryCode: { codeValue: c.c || '' },
+      }));
+      return { data: { associateCertifications: certifications } };
+    }
   }
   console.warn(`Certifications unavailable for AOID: ${aoid}`);
   return { data: { associateCertifications: [] } };
@@ -319,8 +324,8 @@ function lookupSingleEmployeeCertifications(aoid) {
 
 
 function lookupOneEmployeeByAoid() {
-  var empAoid = "G3KE0P6CXQ2NXFZQ";
-  // var empAoid = "G3P2JAYP101VGQDS";
+  var empAoid = "010NT663K0K011XK";
+  // var empAoid = "G3KE0P6CXQ2NXFZQ";
   var empCerts = lookupSingleEmployeeCertifications(empAoid);
   var empData = empCerts.data.associateCertifications;
   for (i = 0; i < empData.length; i++) {
