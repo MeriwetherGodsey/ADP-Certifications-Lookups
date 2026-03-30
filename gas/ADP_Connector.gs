@@ -309,7 +309,7 @@ function lookupSingleEmployeeCertifications(aoid) {
     const normAoid = (v) => decodeURIComponent(String(v || '')).trim();
     const key = Object.keys(result.certs).find(k => normAoid(k) === normAoid(aoid));
     if (key !== undefined) {
-      const raw = result.certs[key] || [];
+      const raw = result.certs[key]?.certs || [];
       const certifications = raw.map(c => ({
         certificationNameCode: { longName: c.n || '' },
         expirationDate: c.e || '',
