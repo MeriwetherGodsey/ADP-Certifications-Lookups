@@ -432,9 +432,21 @@ function processEmployeeCertifications(employees, sheetName, certNames) {
           const expRaw = cert?.expirationDate;
 
           if (category === "C" && nameMatches && expRaw) {
-            const exp = new Date(expRaw);
-            if (!latestCert || exp > new Date(latestCert.expirationDate)) {
+            if (!latestCert) {
               latestCert = cert;
+            } else {
+              const thisExp    = new Date(expRaw);
+              const currentExp = new Date(latestCert.expirationDate);
+              const today      = new Date();
+              const thisCurrent    = thisExp > today;
+              const currentIsCurrent = currentExp > today;
+              // Prefer a non-expired cert over an expired one;
+              // if both same status, prefer the later expiration date
+              if (thisCurrent && !currentIsCurrent) {
+                latestCert = cert;
+              } else if (thisCurrent === currentIsCurrent && thisExp > currentExp) {
+                latestCert = cert;
+              }
             }
           }
         }
