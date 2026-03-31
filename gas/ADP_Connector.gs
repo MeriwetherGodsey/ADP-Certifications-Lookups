@@ -4,6 +4,9 @@ function onOpen() {
   var ui = SpreadsheetApp.getUi();
   // Or DocumentApp or FormApp.
   ui.createMenu('Manually Update ADP')
+    .addItem('Refresh Roster from ADP (slow)', 'refreshRosterFromADP')
+    .addItem('Refresh Certifications from ADP (slow)', 'refreshCertsFromADP')
+    .addSeparator()
     .addItem('Update Roster', 'allActiveEmployees')
     .addSeparator()
     .addItem('Update Food Protection Managers', 'filterFPM')
@@ -25,6 +28,29 @@ function onOpen() {
     .addItem('Update MGR 203', 'updateMgr203')
     .addItem('Update Inservice Data', 'refreshAdpExport')
     .addToUi();
+}
+
+function refreshRosterFromADP() {
+  console.log('Triggering ingestRoster on Lambda...');
+  const result = postSnapshot({ action: 'ingestRoster' });
+  if (!result || result.statusCode !== 200) {
+    SpreadsheetApp.getUi().alert('Roster refresh from ADP failed. Check Apps Script logs.');
+    return;
+  }
+  console.log(`ingestRoster complete: ${result.count} employees written`);
+  allActiveEmployees();
+  SpreadsheetApp.getUi().alert(`Roster refreshed from ADP: ${result.count} employees updated.`);
+}
+
+function refreshCertsFromADP() {
+  console.log('Triggering ingestCerts on Lambda...');
+  const result = postSnapshot({ action: 'ingestCerts' });
+  if (!result || result.statusCode !== 200) {
+    SpreadsheetApp.getUi().alert('Certifications refresh from ADP failed. Check Apps Script logs.');
+    return;
+  }
+  console.log(`ingestCerts complete: ${result.written} certs written, ${result.failures} failures`);
+  SpreadsheetApp.getUi().alert(`Certifications refreshed from ADP: ${result.written} employees updated.${result.failures > 0 ? ` (${result.failures} failures — check Slack)` : ''}`);
 }
 
 function postAdp(data) {
