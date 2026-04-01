@@ -141,7 +141,8 @@ async function ingestRoster() {
   }
 
   if (items.length === 0) {
-    console.warn('[ingestRoster] No items to write');
+    console.warn('[ingestRoster] No items to write — ADP returned no active workers');
+    await notifyFailure('ingestRoster', { 'Warning': 'ADP returned 0 active workers — roster NOT updated' });
     return { statusCode: 200, message: 'No roster items found', count: 0 };
   }
 
