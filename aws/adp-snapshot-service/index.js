@@ -4,7 +4,7 @@ const { getBearerToken, adpGet, mapWithConcurrency } = require('./adp');
 const { notifySuccess, notifyFailure, notifyError } = require('./slack');
 const {
   ROSTER_TABLE, CERTS_TABLE,
-  batchWrite, batchGet,
+  batchWrite, batchDelete, batchGet,
   scanAllRosterAoids, scanAllRoster,
 } = require('./dynamo');
 
@@ -105,6 +105,12 @@ async function ingestRoster() {
     const fetchedAt = new Date().toISOString();
 
     for (const w of workers) {
+      const workerStatus = w?.workerStatus?.statusCode?.codeValue;
+      if (workerStatus && workerStatus !== 'A') {
+        console.log(`[ingestRoster] Skipping ${w.associateOID} — workerStatus=${workerStatus}`);
+        continue;
+      }
+
       const aoid          = w.associateOID || '';
       const name          = buildWorkerDisplayName(w);
       const associateId   = w?.workerID?.idValue || '';
@@ -141,10 +147,20 @@ async function ingestRoster() {
 
   await batchWrite(ROSTER_TABLE, items);
 
+  // Delete stale AOIDs — any row in DynamoDB not in the fresh fetch
+  const freshAoids  = new Set(items.map((i) => i.aoid));
+  const existingAoids = await scanAllRosterAoids();
+  const staleAoids  = existingAoids.filter((a) => !freshAoids.has(a));
+  if (staleAoids.length > 0) {
+    console.log(`[ingestRoster] Deleting ${staleAoids.length} stale AOIDs from roster`);
+    await batchDelete(ROSTER_TABLE, staleAoids.map((a) => ({ aoid: a })));
+  }
+
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
-  console.log(`[ingestRoster] Done. Wrote ${items.length} items in ${elapsed}s`);
+  console.log(`[ingestRoster] Done. Wrote ${items.length} items, deleted ${staleAoids.length} stale in ${elapsed}s`);
   await notifySuccess('ingestRoster', {
     'Employees written': items.length,
+    'Stale deleted':     staleAoids.length,
     'Elapsed':           `${elapsed}s`,
   });
   return { statusCode: 200, message: 'Roster ingest complete', count: items.length, elapsed };

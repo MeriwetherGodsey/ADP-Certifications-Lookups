@@ -7,6 +7,7 @@ const {
   BatchWriteCommand,
   BatchGetCommand,
   ScanCommand,
+  DeleteCommand,
 } = require('@aws-sdk/lib-dynamodb');
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -126,6 +127,33 @@ async function scanAllRoster() {
   return items;
 }
 
+/** =======================
+ *  Batch delete by partition key
+ *  keys: array of objects e.g. [{ aoid: '...' }, ...]
+ *  ======================= */
+async function batchDelete(tableName, keys) {
+  const CHUNK = 25;
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const chunk = keys.slice(i, i + CHUNK);
+    let requests = chunk.map((key) => ({ DeleteRequest: { Key: key } }));
+
+    let attempts = 0;
+    while (requests.length > 0 && attempts < 5) {
+      attempts++;
+      const resp = await ddb.send(new BatchWriteCommand({
+        RequestItems: { [tableName]: requests },
+      }));
+
+      const unprocessed = resp.UnprocessedItems?.[tableName];
+      if (!unprocessed || unprocessed.length === 0) break;
+
+      console.warn(`[dynamo] ${unprocessed.length} unprocessed deletes in ${tableName} — retrying (attempt ${attempts})`);
+      requests = unprocessed;
+      await sleep(200 * attempts);
+    }
+  }
+}
+
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -134,6 +162,7 @@ module.exports = {
   ROSTER_TABLE,
   CERTS_TABLE,
   batchWrite,
+  batchDelete,
   batchGet,
   scanAllRosterAoids,
   scanAllRoster,
