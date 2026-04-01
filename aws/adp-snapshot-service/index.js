@@ -106,7 +106,7 @@ async function ingestRoster() {
 
     for (const w of workers) {
       const workerStatus = w?.workerStatus?.statusCode?.codeValue;
-      if (workerStatus && workerStatus !== 'A') {
+      if (workerStatus && workerStatus !== 'A' && workerStatus !== 'Active') {
         console.log(`[ingestRoster] Skipping ${w.associateOID} — workerStatus=${workerStatus}`);
         continue;
       }
