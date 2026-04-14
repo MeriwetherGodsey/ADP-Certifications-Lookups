@@ -56,6 +56,7 @@ async function notifySlack(text) {
 
 async function downloadFromAdp(remoteFile) {
   const client = new ftp.Client();
+  let fileModifiedTime = null;
   try {
     await client.access({
       host: ADP_FTP_HOST,
@@ -64,10 +65,19 @@ async function downloadFromAdp(remoteFile) {
       secure: false
     });
     await client.cd(ADP_REMOTE_DIR);
+
+    // Get directory listing to capture original upload timestamp
+    const listing = await client.list();
+    const entry = listing.find(f => f.name === remoteFile);
+    if (entry?.modifiedAt) {
+      fileModifiedTime = entry.modifiedAt;
+    }
+
     await client.download(fs.createWriteStream(SRC_PATH), remoteFile);
   } finally {
     client.close();
   }
+  return { fileModifiedTime };
 }
 
 async function uploadToMg(localPath, remoteName) {
@@ -143,8 +153,13 @@ exports.handler = async (event = {}) => {
   // 2) Download the source CSV from ADP
   const sourceFileName = todayFileName();
   try {
-    await downloadFromAdp(sourceFileName);
-    slackLog += `:white_check_mark: Downloaded ${sourceFileName} from ADP.\n`;
+    const { fileModifiedTime } = await downloadFromAdp(sourceFileName);
+    const uploadedAt = fileModifiedTime
+      ? fileModifiedTime.toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
+      : 'unknown';
+    slackLog += `:white_check_mark: Downloaded *${sourceFileName}* from ADP FTP.\n`;
+    slackLog += `:clock3: ADP file last modified: *${uploadedAt}*\n`;
+    slackLog += `:page_facing_up: Will be published as: *${OUT_FILE_NAME}*\n`;
   } catch (err) {
     console.log('ADP download error:', err);
     slackLog += `:rotating_light: ADP download failed: ${err}\n`;
