@@ -1,0 +1,15 @@
+{
+  "name": "ftp-to-google-drive",
+  "version": "1.0.0",
+  "description": "Downloads ADP inservice CSV via FTP, filters by completion date, uploads to MG FTP",
+  "main": "index.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@fast-csv/format": "^5.0.5",
+    "@fast-csv/parse": "^5.0.5",
+    "basic-ftp": "^5.0.5",
+    "phin": "^4.0.0"
+  }
+}
