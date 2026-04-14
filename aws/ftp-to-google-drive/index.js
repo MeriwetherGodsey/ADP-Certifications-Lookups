@@ -66,11 +66,14 @@ async function downloadFromAdp(remoteFile) {
     });
     await client.cd(ADP_REMOTE_DIR);
 
-    // Get directory listing to capture original upload timestamp
-    const listing = await client.list();
-    const entry = listing.find(f => f.name === remoteFile);
-    if (entry?.modifiedAt) {
-      fileModifiedTime = entry.modifiedAt;
+    // Get last modified timestamp for the file
+    try {
+      fileModifiedTime = await client.lastMod(remoteFile);
+    } catch (e) {
+      console.log('lastMod not supported by server, falling back to list()');
+      const listing = await client.list();
+      const entry = listing.find(f => f.name === remoteFile);
+      if (entry?.modifiedAt) fileModifiedTime = entry.modifiedAt;
     }
 
     await client.download(fs.createWriteStream(SRC_PATH), remoteFile);
@@ -154,9 +157,17 @@ exports.handler = async (event = {}) => {
   const sourceFileName = todayFileName();
   try {
     const { fileModifiedTime } = await downloadFromAdp(sourceFileName);
-    const uploadedAt = fileModifiedTime
-      ? fileModifiedTime.toISOString().replace('T', ' ').slice(0, 19) + ' UTC'
-      : 'unknown';
+    let uploadedAt = 'unknown';
+    if (fileModifiedTime) {
+      const utcStr = fileModifiedTime.toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
+      const etStr = fileModifiedTime.toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+      }) + ' ET';
+      uploadedAt = `${utcStr} (${etStr})`;
+    }
     slackLog += `:white_check_mark: Downloaded *${sourceFileName}* from ADP FTP.\n`;
     slackLog += `:clock3: ADP file last modified: *${uploadedAt}*\n`;
     slackLog += `:page_facing_up: Will be published as: *${OUT_FILE_NAME}*\n`;
