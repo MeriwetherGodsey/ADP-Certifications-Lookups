@@ -142,6 +142,35 @@ function buildRowFilter(cutoffDateUtc, completionHeaderName, completionColumnInd
 }
 
 exports.handler = async (event = {}) => {
+  // Diagnostic: list ADP FTP directory and log all file metadata
+  if (event.action === 'listDir') {
+    const client = new ftp.Client();
+    try {
+      await client.access({
+        host: ADP_FTP_HOST,
+        user: ADP_FTP_USER,
+        password: ADP_FTP_PASS,
+        secure: false
+      });
+      await client.cd(ADP_REMOTE_DIR);
+      const listing = await client.list();
+      console.log('FTP directory listing:');
+      for (const entry of listing) {
+        console.log(JSON.stringify(entry));
+        // Also try lastMod on each file
+        try {
+          const lm = await client.lastMod(entry.name);
+          console.log(`lastMod(${entry.name}):`, lm);
+        } catch (e) {
+          console.log(`lastMod(${entry.name}) failed:`, e?.message || e);
+        }
+      }
+    } finally {
+      client.close();
+    }
+    return { statusCode: 200, body: 'listDir complete — check CloudWatch logs' };
+  }
+
   let slackLog = '';
 
   // 1) Resolve cutoff date
