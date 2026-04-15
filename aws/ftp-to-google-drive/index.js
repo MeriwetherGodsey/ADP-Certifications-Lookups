@@ -69,10 +69,12 @@ async function downloadFromAdp(remoteFile) {
     // Get last modified timestamp for the file
     try {
       fileModifiedTime = await client.lastMod(remoteFile);
+      console.log('lastMod result:', fileModifiedTime);
     } catch (e) {
-      console.log('lastMod not supported by server, falling back to list()');
+      console.log('lastMod failed:', e?.message || e);
       const listing = await client.list();
       const entry = listing.find(f => f.name === remoteFile);
+      console.log('list() entry for file:', JSON.stringify(entry));
       if (entry?.modifiedAt) fileModifiedTime = entry.modifiedAt;
     }
 
