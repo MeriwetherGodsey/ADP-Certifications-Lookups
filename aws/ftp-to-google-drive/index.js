@@ -66,16 +66,22 @@ async function downloadFromAdp(remoteFile) {
     });
     await client.cd(ADP_REMOTE_DIR);
 
-    // Get last modified timestamp for the file
-    try {
-      fileModifiedTime = await client.lastMod(remoteFile);
-      console.log('lastMod result:', fileModifiedTime);
-    } catch (e) {
-      console.log('lastMod failed:', e?.message || e);
-      const listing = await client.list();
-      const entry = listing.find(f => f.name === remoteFile);
-      console.log('list() entry for file:', JSON.stringify(entry));
-      if (entry?.modifiedAt) fileModifiedTime = entry.modifiedAt;
+    // MDTM is blocked on this server — parse rawModifiedAt from list() instead
+    // Format: "Apr 15 14:16" (no year, UTC assumed)
+    const listing = await client.list();
+    const entry = listing.find(f => f.name === remoteFile);
+    console.log('list() entry for file:', JSON.stringify(entry));
+    if (entry?.rawModifiedAt) {
+      const raw = entry.rawModifiedAt.trim(); // e.g. "Apr 15 14:16"
+      const now = new Date();
+      // Attempt parse with current year; if result is in the future, use prior year
+      const attempt = new Date(`${raw} ${now.getUTCFullYear()} UTC`);
+      if (!isNaN(attempt.getTime())) {
+        fileModifiedTime = attempt > now
+          ? new Date(`${raw} ${now.getUTCFullYear() - 1} UTC`)
+          : attempt;
+      }
+      console.log('parsed fileModifiedTime:', fileModifiedTime);
     }
 
     await client.download(fs.createWriteStream(SRC_PATH), remoteFile);
