@@ -132,9 +132,23 @@ function parseDateMaybe(s) {
   return isNaN(dt.getTime()) ? null : dt;
 }
 
-// Return true if row's Completion Date > cutoff
+// Course codes that are always included regardless of completion date
+// Populated from EXEMPT_COURSE_CODES env var (comma-separated, e.g. "INS 123,INS 137")
+const EXEMPT_COURSE_CODES = process.env.EXEMPT_COURSE_CODES
+  ? new Set(process.env.EXEMPT_COURSE_CODES.split(',').map(s => s.trim().toUpperCase()).filter(Boolean))
+  : new Set();
+
+const COURSE_CODE_HEADER = 'Course Name Code';
+
+// Return true if row's Completion Date > cutoff, OR if the course code is exempt
 function buildRowFilter(cutoffDateUtc, completionHeaderName, completionColumnIndex) {
   return function shouldKeep(row) {
+    // Always include rows whose course code is in the exempt list
+    if (EXEMPT_COURSE_CODES.size > 0) {
+      const code = (row[COURSE_CODE_HEADER] || '').trim().toUpperCase();
+      if (EXEMPT_COURSE_CODES.has(code)) return true;
+    }
+
     let val = row[completionHeaderName];
     if (val === undefined && completionColumnIndex != null) {
       const keys = Object.keys(row);
