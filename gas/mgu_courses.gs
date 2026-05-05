@@ -76,7 +76,7 @@ function updateMgr101(){
   var mgr101JobDescriptions = getMGUCourseRoleByCode('MGR101');
   var mgr101Employees = _.filter(roster.employees, (v) => _.includes(mgr101JobDescriptions, v.jobTitle));
   var inserviceDataObject = getInserviceDataAsObject();
-  const mgr101Codes = ['MGR101'];
+  const mgr101Codes = ['MGR101', 'DIR101'];
   let mgr101EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(mgr101Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MGR 101");
   var lastRow = sheet.getLastRow();
