@@ -4,7 +4,8 @@ function updateProd101(){
   var prod101Employees = _.filter(roster.employees, (v) => _.includes(prod101JobDescriptions, v.jobTitle));
   console.log(typeof prod101Employees[0].positionStartDate);
   var inserviceDataObject = getInserviceDataAsObject();
-  let prod101EmployeeInfo = _.filter(inserviceDataObject, {courseNameCode: 'PROD101'});
+  const prod101Codes = ['PROD101'];
+  let prod101EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(prod101Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PROD 101");
   var lastRow = sheet.getLastRow();
   sheet.getRange(2, 1, lastRow, 10).clearContent();
@@ -27,7 +28,8 @@ function updateChef101(){
   var chef101JobDescriptions = getMGUCourseRoleByCode('CHEF101');
   var chef101Employees = _.filter(roster.employees, (v) => _.includes(chef101JobDescriptions, v.jobTitle));
   var inserviceDataObject = getInserviceDataAsObject();
-  let chef101EmployeeInfo = _.filter(inserviceDataObject, {courseNameCode: 'CHEF101'});
+  const chef101Codes = ['CHEF101'];
+  let chef101EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(chef101Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("CHEF 101");
   var lastRow = sheet.getLastRow();
   sheet.getRange(2, 1, lastRow, 10).clearContent();
@@ -50,7 +52,8 @@ function updateDir101(){
   var dir101JobDescriptions = getMGUCourseRoleByCode('DIR101');
   var dir101Employees = _.filter(roster.employees, (v) => _.includes(dir101JobDescriptions, v.jobTitle));
   var inserviceDataObject = getInserviceDataAsObject();
-  let dir101EmployeeInfo = _.filter(inserviceDataObject, {courseNameCode: 'DIR101'});
+  const dir101Codes = ['DIR101'];
+  let dir101EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(dir101Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("DIR 101");
   var lastRow = sheet.getLastRow();
   sheet.getRange(2, 1, lastRow, 10).clearContent();
@@ -73,7 +76,8 @@ function updateMgr101(){
   var mgr101JobDescriptions = getMGUCourseRoleByCode('MGR101');
   var mgr101Employees = _.filter(roster.employees, (v) => _.includes(mgr101JobDescriptions, v.jobTitle));
   var inserviceDataObject = getInserviceDataAsObject();
-  let mgr101EmployeeInfo = _.filter(inserviceDataObject, {courseNameCode: 'MGR101'});
+  const mgr101Codes = ['MGR101'];
+  let mgr101EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(mgr101Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MGR 101");
   var lastRow = sheet.getLastRow();
   sheet.getRange(2, 1, lastRow, 10).clearContent();
@@ -96,7 +100,8 @@ function updateMgr203(){
   var mgr203JobDescriptions = getMGUCourseRoleByCode('MGR203');
   var mgr203Employees = _.filter(roster.employees, (v) => _.includes(mgr203JobDescriptions, v.jobTitle));
   var inserviceDataObject = getInserviceDataAsObject();
-  let mgr203EmployeeInfo = _.filter(inserviceDataObject, {courseNameCode: 'MGR203'});
+  const mgr203Codes = ['MGR203'];
+  let mgr203EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(mgr203Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MGR 203");
   var lastRow = sheet.getLastRow();
   sheet.getRange(2, 1, lastRow, 10).clearContent();
@@ -121,7 +126,8 @@ function updateCat201(){
   var vaAccounts = getRegionalDataByFilter('VA Accounts');
   var cat201VAEmployees = _.filter(cat201Employees, (v) => _.includes(vaAccounts, v.account));
   var inserviceDataObject = getInserviceDataAsObject();
-  let cat201EmployeeInfo = _.filter(inserviceDataObject, {courseNameCode: 'CAT201'});
+  const cat201Codes = ['CAT201'];
+  let cat201EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(cat201Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("CAT 201");
   var lastRow = sheet.getLastRow();
   sheet.getRange(2, 1, lastRow, 10).clearContent();
