@@ -4,7 +4,7 @@ function updateProd101(){
   var prod101Employees = _.filter(roster.employees, (v) => _.includes(prod101JobDescriptions, v.jobTitle));
   console.log(typeof prod101Employees[0].positionStartDate);
   var inserviceDataObject = getInserviceDataAsObject();
-  const prod101Codes = ['PROD101'];
+  const prod101Codes = ['PROD101', 'CHEF101', 'DIR101'];
   let prod101EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(prod101Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("PROD 101");
   var lastRow = sheet.getLastRow();
@@ -76,7 +76,7 @@ function updateMgr101(){
   var mgr101JobDescriptions = getMGUCourseRoleByCode('MGR101');
   var mgr101Employees = _.filter(roster.employees, (v) => _.includes(mgr101JobDescriptions, v.jobTitle));
   var inserviceDataObject = getInserviceDataAsObject();
-  const mgr101Codes = ['MGR101', 'DIR101'];
+  const mgr101Codes = ['MGR101', 'CHEF101', 'DIR101'];
   let mgr101EmployeeInfo = _.filter(inserviceDataObject, (v) => _.includes(mgr101Codes, v.courseNameCode));
   var sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName("MGR 101");
   var lastRow = sheet.getLastRow();
