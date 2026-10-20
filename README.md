@@ -51,6 +51,19 @@ Lambda functions are deployed automatically via GitHub Actions on push to `main`
 ### adp-snapshot-service
 Set in AWS Console → Lambda → adp-snapshot-service → Configuration → Environment variables.
 
+| Variable | Description |
+|---|---|
+| `SLACK_WEBHOOK_URL` | Slack app incoming webhook URL |
+| `SLACK_SIGNING_SECRET` | Slack app signing secret — verifies "Retry failed AOIDs" button clicks |
+| `FUNCTION_URL_SECRET` | Shared secret GAS sends in `x-adp-secret` |
+| `CERT_CONCURRENCY` | Parallel ADP cert requests (default `4`) |
+
+#### Slack "Retry failed AOIDs" button
+When `ingestCerts` still has failures after its internal retries, the Slack alert includes a button that re-runs `ingestCerts` for just the failed AOIDs (no need to open the sheet). One-time setup:
+1. Slack app (the one owning the webhook) → **Interactivity & Shortcuts** → On; Request URL = the Lambda Function URL (same as GAS script property `SNAPSHOT_LAMBDA_URL`).
+2. Slack app → **Basic Information** → copy **Signing Secret** into the Lambda env var `SLACK_SIGNING_SECRET`.
+3. Lambda execution role needs `lambda:InvokeFunction` on its own ARN (the button triggers an async self-invoke).
+
 ### ftp-to-google-drive
 | Variable | Description |
 |---|---|

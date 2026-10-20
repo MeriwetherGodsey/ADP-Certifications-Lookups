@@ -1,7 +1,12 @@
 'use strict';
 
 const { getBearerToken, adpGet, mapWithConcurrency } = require('./adp');
-const { notifySuccess, notifyFailure, notifyError } = require('./slack');
+const { LambdaClient, InvokeCommand } = require('@aws-sdk/client-lambda');
+const {
+  RETRY_ACTION_ID,
+  notifySuccess, notifyFailure, notifyCertFailure, notifyError,
+  verifySlackSignature, respondToSlack,
+} = require('./slack');
 const {
   ROSTER_TABLE, CERTS_TABLE,
   batchWrite, batchDelete, batchGet,
@@ -21,6 +26,11 @@ const {
  *  GAS calls should POST { "action": "getRoster" } or { "action": "getCerts", "aoids": [...] }
  *  ======================= */
 exports.handler = async (event) => {
+  // Slack interactivity (button clicks) — authenticated by Slack signing secret instead of x-adp-secret
+  if (event?.headers?.['x-slack-signature']) {
+    return handleSlackInteraction(event);
+  }
+
   // Shared secret check for Function URL calls (EventBridge bypasses this — no headers)
   if (event?.headers) {
     const expected = process.env.FUNCTION_URL_SECRET;
@@ -49,7 +59,7 @@ exports.handler = async (event) => {
   try {
     switch (action) {
       case 'ingestRoster': return respond(await ingestRoster());
-      case 'ingestCerts':  return respond(await ingestCerts());
+      case 'ingestCerts':  return respond(await ingestCerts({ aoids: body?.aoids, requestedBy: body?.requestedBy }));
       case 'getRoster':    return respond(await getRoster());
       case 'getCerts':     return respond(await getCerts(body?.aoids));
       default:
@@ -169,72 +179,25 @@ async function ingestRoster() {
 
 /** =======================
  *  ingestCerts
- *  Reads AOIDs from adp_roster_latest, fetches certs for each, stores in adp_associate_certs_latest
+ *  Reads AOIDs from adp_roster_latest (or uses the provided aoids), fetches certs for each,
+ *  stores in adp_associate_certs_latest
  *  ======================= */
-async function ingestCerts() {
+async function ingestCerts({ aoids: aoidsOverride, requestedBy } = {}) {
   const t0    = Date.now();
   const token = await getBearerToken();
 
-  const aoids = await scanAllRosterAoids();
-  console.log(`[ingestCerts] ${aoids.length} AOIDs from roster`);
+  const isPartial = Array.isArray(aoidsOverride) && aoidsOverride.length > 0;
+  const aoids     = isPartial
+    ? aoidsOverride.map((a) => String(a).trim()).filter(Boolean)
+    : await scanAllRosterAoids();
+  console.log(`[ingestCerts] ${aoids.length} AOIDs from ${isPartial ? 'request' : 'roster'}${requestedBy ? ` (requested by ${requestedBy})` : ''}`);
 
   if (aoids.length === 0) {
     return { statusCode: 200, message: 'No AOIDs in roster — run ingestRoster first', count: 0 };
   }
 
-  const CONCURRENCY     = Number(process.env.CERT_CONCURRENCY || 4);
-  const MAX_429_RETRIES = 6;
-  const BASE_SLEEP_MS   = 1200;
-
-  // First pass
   const fetchedAt = new Date().toISOString();
-  const firstResults = await mapWithConcurrency(aoids, CONCURRENCY, async (aoid) => {
-    const uri    = `/talent/v2/associates/${encodeURIComponent(aoid)}/associate-certifications`;
-    const result = await adpGet(token, 'https://accounts.adp.com', uri);
-    return { aoid, ...result };
-  });
-
-  // Separate successes from 429s and other failures
-  let toRetry    = [];
-  const successes = [];
-  const failures  = [];
-
-  for (const r of firstResults) {
-    if (r.statusCode === 200 || r.statusCode === 204) {
-      successes.push(r);
-    } else if (r.statusCode === 429) {
-      toRetry.push(r.aoid);
-    } else {
-      failures.push(r);
-      console.warn(`[ingestCerts] ${r.aoid} returned ${r.statusCode}`);
-    }
-  }
-
-  // Retry loop for 429s
-  for (let attempt = 1; attempt <= MAX_429_RETRIES && toRetry.length > 0; attempt++) {
-    const jitter   = Math.floor(Math.random() * 250);
-    const sleepMs  = (BASE_SLEEP_MS * Math.pow(2, attempt - 1)) + jitter;
-    console.log(`[ingestCerts] Retrying ${toRetry.length} rate-limited AOIDs (attempt ${attempt}) after ${sleepMs}ms`);
-    await sleep(sleepMs);
-
-    const retryResults = await mapWithConcurrency(toRetry, CONCURRENCY, async (aoid) => {
-      const uri    = `/talent/v2/associates/${encodeURIComponent(aoid)}/associate-certifications`;
-      const result = await adpGet(token, 'https://accounts.adp.com', uri);
-      return { aoid, ...result };
-    });
-
-    toRetry = [];
-    for (const r of retryResults) {
-      if (r.statusCode === 200 || r.statusCode === 204) {
-        successes.push(r);
-      } else if (r.statusCode === 429) {
-        toRetry.push(r.aoid);
-      } else {
-        failures.push(r);
-        console.warn(`[ingestCerts] ${r.aoid} returned ${r.statusCode} on retry ${attempt}`);
-      }
-    }
-  }
+  const { successes, failures } = await fetchCertsWithRetries(token, aoids);
 
   // Build DynamoDB items — only write successful lookups
   const items = successes.map((r) => {
@@ -256,22 +219,24 @@ async function ingestCerts() {
   }
 
   const elapsed      = ((Date.now() - t0) / 1000).toFixed(1);
-  const failureCount = failures.length + toRetry.length;
+  const failureCount = failures.length;
   console.log(`[ingestCerts] Done. Wrote ${items.length} items. Failures=${failureCount} in ${elapsed}s`);
+  if (failureCount > 0) {
+    console.warn(`[ingestCerts] Failed AOIDs: ${failures.map((f) => `${f.aoid}(${f.statusCode})`).join(', ')}`);
+  }
+
+  const details = {
+    ...(requestedBy ? { 'Retry requested by': `<@${requestedBy}>` } : {}),
+    ...(isPartial ? { 'Scope': `${aoids.length} requested AOIDs` } : {}),
+    'Certs written': items.length,
+    'Failed AOIDs':  failureCount,
+    'Elapsed':       `${elapsed}s`,
+  };
 
   if (failureCount > 0) {
-    await notifyFailure('ingestCerts', {
-      'Certs written':         items.length,
-      'Failed AOIDs':          failureCount,
-      'Elapsed':               `${elapsed}s`,
-      'Note':                  'Check CloudWatch logs for affected AOIDs',
-    });
+    await notifyCertFailure(details, failures);
   } else {
-    await notifySuccess('ingestCerts', {
-      'Certs written': items.length,
-      'Failed AOIDs':  0,
-      'Elapsed':       `${elapsed}s`,
-    });
+    await notifySuccess('ingestCerts', details);
   }
 
   return {
@@ -281,6 +246,105 @@ async function ingestCerts() {
     failures:   failureCount,
     elapsed,
   };
+}
+
+/** =======================
+ *  fetchCertsWithRetries
+ *  Fetches certs for each AOID; any non-200/204 result (429, 5xx, network errors) is retried
+ *  with exponential backoff. Returns { successes, failures: [{ aoid, statusCode }] }
+ *  ======================= */
+async function fetchCertsWithRetries(token, aoids) {
+  const CONCURRENCY   = Number(process.env.CERT_CONCURRENCY || 4);
+  const MAX_RETRIES   = 6;
+  const BASE_SLEEP_MS = 1200;
+
+  const fetchOne = async (aoid) => {
+    const uri    = `/talent/v2/associates/${encodeURIComponent(aoid)}/associate-certifications`;
+    const result = await adpGet(token, 'https://accounts.adp.com', uri);
+    return { aoid, ...result };
+  };
+
+  const successes = [];
+  let pending     = [];
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const batch = attempt === 0 ? aoids : pending.map((r) => r.aoid);
+    if (batch.length === 0) break;
+
+    if (attempt > 0) {
+      const sleepMs = (BASE_SLEEP_MS * Math.pow(2, attempt - 1)) + Math.floor(Math.random() * 250);
+      const codes   = [...new Set(pending.map((r) => r.statusCode))].join(',');
+      console.log(`[ingestCerts] Retrying ${batch.length} AOIDs (attempt ${attempt}, codes=${codes}) after ${sleepMs}ms`);
+      await sleep(sleepMs);
+    }
+
+    const results = await mapWithConcurrency(batch, CONCURRENCY, fetchOne);
+    pending = [];
+    for (const r of results) {
+      if (r.statusCode === 200 || r.statusCode === 204) successes.push(r);
+      else pending.push(r);
+    }
+  }
+
+  return { successes, failures: pending.map((r) => ({ aoid: r.aoid, statusCode: r.statusCode })) };
+}
+
+/** =======================
+ *  handleSlackInteraction
+ *  Handles the "Retry failed AOIDs" button from ingestCerts failure messages.
+ *  Verifies the Slack signature, kicks off ingestCerts asynchronously (Slack requires a reply
+ *  within 3s), and replaces the original message so the button can't be clicked twice.
+ *  ======================= */
+const lambda = new LambdaClient({ region: process.env.AWS_REGION || 'us-east-1' });
+
+async function handleSlackInteraction(event) {
+  const rawBody = event.isBase64Encoded
+    ? Buffer.from(event.body || '', 'base64').toString('utf8')
+    : (event.body || '');
+
+  if (!verifySlackSignature(event.headers, rawBody)) {
+    console.warn('[slack] Invalid or missing Slack signature');
+    return { statusCode: 401, body: 'Unauthorized' };
+  }
+
+  const payload = JSON.parse(new URLSearchParams(rawBody).get('payload') || '{}');
+  const action  = payload?.actions?.[0];
+  if (payload.type !== 'block_actions' || action?.action_id !== RETRY_ACTION_ID) {
+    console.warn(`[slack] Ignoring interaction type=${payload.type} action=${action?.action_id}`);
+    return { statusCode: 200, body: '' };
+  }
+
+  const userId = payload?.user?.id;
+  const value  = JSON.parse(action.value || '{}');
+  const aoids  = Array.isArray(value.aoids) ? value.aoids : undefined;
+  const scope  = aoids ? `${aoids.length} AOIDs` : 'full roster';
+  console.log(`[slack] Retry ingestCerts requested by ${userId} (${scope})`);
+
+  try {
+    await lambda.send(new InvokeCommand({
+      FunctionName:   process.env.AWS_LAMBDA_FUNCTION_NAME,
+      InvocationType: 'Event',
+      Payload:        Buffer.from(JSON.stringify({ action: 'ingestCerts', aoids, requestedBy: userId })),
+    }));
+  } catch (err) {
+    console.error('[slack] Failed to invoke ingestCerts:', err?.message || err);
+    await respondToSlack(payload.response_url, {
+      response_type:    'ephemeral',
+      replace_original: false,
+      text:             `:warning: Could not start retry: ${err?.message || err}`,
+    });
+    return { statusCode: 200, body: '' };
+  }
+
+  const startedText = `:hourglass_flowing_sand: Retry started by <@${userId}> (${scope}) — results will post here when done.`;
+  const keptBlocks  = (payload?.message?.blocks || []).filter((b) => b.type !== 'actions');
+  await respondToSlack(payload.response_url, {
+    replace_original: true,
+    text:             `${payload?.message?.text || ''}\n${startedText}`,
+    blocks:           [...keptBlocks, { type: 'context', elements: [{ type: 'mrkdwn', text: startedText }] }],
+  });
+
+  return { statusCode: 200, body: '' };
 }
 
 /** =======================
