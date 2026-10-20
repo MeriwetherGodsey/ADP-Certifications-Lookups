@@ -197,7 +197,7 @@ async function ingestCerts({ aoids: aoidsOverride, requestedBy } = {}) {
   }
 
   const fetchedAt = new Date().toISOString();
-  const { successes, failures } = await fetchCertsWithRetries(token, aoids);
+  const { successes, recovered, failures } = await fetchCertsWithRetries(token, aoids);
 
   // Build DynamoDB items — only write successful lookups
   const items = successes.map((r) => {
@@ -224,11 +224,15 @@ async function ingestCerts({ aoids: aoidsOverride, requestedBy } = {}) {
   if (failureCount > 0) {
     console.warn(`[ingestCerts] Failed AOIDs: ${failures.map((f) => `${f.aoid}(${f.statusCode})`).join(', ')}`);
   }
+  if (recovered.length > 0) {
+    console.log(`[ingestCerts] Recovered on retry: ${recovered.map((r) => `${r.aoid}(${r.statusCode})`).join(', ')}`);
+  }
 
   const details = {
     ...(requestedBy ? { 'Retry requested by': `<@${requestedBy}>` } : {}),
     ...(isPartial ? { 'Scope': `${aoids.length} requested AOIDs` } : {}),
     'Certs written': items.length,
+    ...(recovered.length > 0 ? { 'Recovered on retry': summarizeStatusCodes(recovered) } : {}),
     'Failed AOIDs':  failureCount,
     'Elapsed':       `${elapsed}s`,
   };
@@ -264,8 +268,10 @@ async function fetchCertsWithRetries(token, aoids) {
     return { aoid, ...result };
   };
 
-  const successes = [];
-  let pending     = [];
+  const successes    = [];
+  const recovered    = [];
+  const firstFailure = new Map();
+  let pending        = [];
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const batch = attempt === 0 ? aoids : pending.map((r) => r.aoid);
@@ -281,12 +287,21 @@ async function fetchCertsWithRetries(token, aoids) {
     const results = await mapWithConcurrency(batch, CONCURRENCY, fetchOne);
     pending = [];
     for (const r of results) {
-      if (r.statusCode === 200 || r.statusCode === 204) successes.push(r);
-      else pending.push(r);
+      if (r.statusCode === 200 || r.statusCode === 204) {
+        successes.push(r);
+        if (firstFailure.has(r.aoid)) recovered.push({ aoid: r.aoid, statusCode: firstFailure.get(r.aoid) });
+      } else {
+        if (!firstFailure.has(r.aoid)) firstFailure.set(r.aoid, r.statusCode);
+        pending.push(r);
+      }
     }
   }
 
-  return { successes, failures: pending.map((r) => ({ aoid: r.aoid, statusCode: r.statusCode })) };
+  return {
+    successes,
+    recovered,
+    failures: pending.map((r) => ({ aoid: r.aoid, statusCode: r.statusCode })),
+  };
 }
 
 /** =======================
@@ -411,6 +426,13 @@ function buildWorkerDisplayName(w) {
   if (formatted)       return formatted;
   if (family)          return family;
   return first;
+}
+
+function summarizeStatusCodes(entries) {
+  const counts = {};
+  for (const e of entries) counts[e.statusCode] = (counts[e.statusCode] || 0) + 1;
+  const parts = Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([code, n]) => `${code}×${n}`);
+  return `${entries.length} (${parts.join(', ')})`;
 }
 
 function sleep(ms) {
