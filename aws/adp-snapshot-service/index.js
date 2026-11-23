@@ -38,10 +38,12 @@ exports.handler = async (event) => {
   }
 
   // Shared secret check for Function URL calls (EventBridge bypasses this — no headers)
+  // Fails closed: if FUNCTION_URL_SECRET is unset, all HTTP calls are rejected
   if (event?.headers) {
     const expected = process.env.FUNCTION_URL_SECRET;
     const provided = event?.headers?.['x-adp-secret'];
-    if (expected && provided !== expected) {
+    if (!expected || provided !== expected) {
+      if (!expected) console.error('[handler] FUNCTION_URL_SECRET is not set — rejecting HTTP request');
       return { statusCode: 401, error: 'Unauthorized' };
     }
   }
