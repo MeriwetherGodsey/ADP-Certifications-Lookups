@@ -4,16 +4,15 @@
  *  Daily flow (refreshRequisitions, run by a time-driven trigger and the menu):
  *    1. Lambda ingestRequisitions — pulls ADP requisitions, marks new / reopened / new-on-hold rows as pendingAlert
  *    2. Lambda getRequisitions    — returns all stored rows
- *    3. Join job titles with ADP Info → "IT Job Title Requirements" (col A = Job Title, one checkbox column per IT need)
- *    4. Rewrite ADP Info → "Open Requisitions" (ON/OH reqs with IT needs, plus unmapped titles)
+ *    3. Keep only reqs whose job title is listed in ADP Info → "IT Job Titles" (col A, header in row 1)
+ *    4. Rewrite ADP Info → "Open Requisitions" (ON/OH reqs with a listed title)
  *    5. Email one digest of pending alerts to the IT_ALERT_EMAILS script property
  *    6. Lambda ackRequisitionAlerts — only after the email succeeds, so failures retry next run
  *  ======================= */
 const REQ_ADP_INFO_ID        = '1fw8-K0oSyRKvCICvIEov4fPLlSPU_yMPKSibi5Z1yBE';
-const REQ_IT_MAPPING_SHEET   = 'IT Job Title Requirements';
+const REQ_IT_TITLES_SHEET    = 'IT Job Titles';
 const REQ_LISTING_SHEET      = 'Open Requisitions';
 const REQ_LISTED_STATUSES    = ['ON', 'OH'];
-const REQ_UNMAPPED           = 'Unmapped – add to IT Job Title Requirements';
 
 function refreshRequisitions() {
   const ingest = postSnapshot({ action: 'ingestRequisitions' });
@@ -31,49 +30,42 @@ function refreshRequisitions() {
   }
 
   const adpInfo  = SpreadsheetApp.openById(REQ_ADP_INFO_ID);
-  const mapping  = loadItNeedsMapping_(adpInfo);
-  const enriched = result.requisitions.map(function (r) {
-    const needs = mapping[normalizeTitle_(r.jobTitle)];
-    return Object.assign({}, r, { itNeeds: needs === undefined ? null : needs });
-  });
-  const relevant = enriched.filter(function (r) {
-    return REQ_LISTED_STATUSES.indexOf(r.status) !== -1 && hasItRelevance_(r);
+  const itTitles = loadItTitles_(adpInfo);
+  if (!itTitles) {
+    // Without the list every alert would be filtered out and then acked — i.e. silently lost
+    notifySlackFromGAS(`:rotating_light: *refreshRequisitions* — "${REQ_IT_TITLES_SHEET}" tab in ADP Info is missing or empty. No email sent; alerts stay pending.`);
+    reqAlert_(`"${REQ_IT_TITLES_SHEET}" tab is missing or empty — nothing listed or emailed.`);
+    return;
+  }
+
+  const isItTitle = function (r) { return itTitles.has(normalizeTitle_(r.jobTitle)); };
+  const relevant  = result.requisitions.filter(function (r) {
+    return REQ_LISTED_STATUSES.indexOf(r.status) !== -1 && isItTitle(r);
   });
 
   writeRequisitionsTab_(adpInfo, relevant);
-  const sent = emailPendingAlerts_(enriched.filter(function (r) { return r.pendingAlert; }));
+  const sent = emailPendingAlerts_(result.requisitions.filter(function (r) { return r.pendingAlert; }), isItTitle);
 
   console.log(`refreshRequisitions: ${relevant.length} listed, digest=${sent}`);
   reqAlert_(`Open Requisitions refreshed: ${relevant.length} listed. ${sent}`);
 }
 
-/** Header row → need names; returns { normalizedTitle: [needs...] }. A listed title with no boxes = no IT needs. */
-function loadItNeedsMapping_(adpInfo) {
-  const sheet = adpInfo.getSheetByName(REQ_IT_MAPPING_SHEET);
-  if (!sheet || sheet.getLastRow() < 2) {
-    console.warn(`loadItNeedsMapping_: "${REQ_IT_MAPPING_SHEET}" tab missing or empty — every title will show as unmapped`);
-    return {};
-  }
-  const values  = sheet.getDataRange().getValues();
-  const headers = values[0];
-  const mapping = {};
-  for (let i = 1; i < values.length; i++) {
-    const title = normalizeTitle_(values[i][0]);
-    if (!title) continue;
-    const needs = [];
-    for (let c = 1; c < headers.length; c++) {
-      const name = String(headers[c] || '').trim();
-      if (name && isChecked_(values[i][c])) needs.push(name);
-    }
-    mapping[title] = needs;
-  }
-  return mapping;
+/** Column A (row 1 = header) → Set of normalized job titles; null if the tab is missing or has no titles. */
+function loadItTitles_(adpInfo) {
+  const sheet = adpInfo.getSheetByName(REQ_IT_TITLES_SHEET);
+  if (!sheet || sheet.getLastRow() < 2) return null;
+  const titles = new Set();
+  sheet.getRange(2, 1, sheet.getLastRow() - 1, 1).getValues().forEach(function (row) {
+    const t = normalizeTitle_(row[0]);
+    if (t) titles.add(t);
+  });
+  return titles.size ? titles : null;
 }
 
 function writeRequisitionsTab_(adpInfo, reqs) {
   const sheet = adpInfo.getSheetByName(REQ_LISTING_SHEET) || adpInfo.insertSheet(REQ_LISTING_SHEET);
   const header = ['Req #', 'Status', 'Job Title', 'Account', 'Account Name', 'Worker Type', 'Openings',
-    'Projected Start', 'Replacement', 'Hiring Manager', 'IT Needs', 'First Seen', 'Last Seen'];
+    'Projected Start', 'Replacement', 'Hiring Manager', 'First Seen', 'Last Seen'];
 
   const sorted = reqs.slice().sort(function (a, b) {
     return (a.projectedStartDate || '9999').localeCompare(b.projectedStartDate || '9999');
@@ -82,7 +74,7 @@ function writeRequisitionsTab_(adpInfo, reqs) {
     return [
       r.reqNumber || '', r.statusName || r.status || '', r.jobTitle || '', r.account || '', r.accountName || '',
       r.workerType || '', r.openings || 0, r.projectedStartDate || '', r.isBackfill ? 'Y' : 'N',
-      r.hiringManager || '', formatNeeds_(r), r.firstSeenAt || '', r.lastSeenAt || '',
+      r.hiringManager || '', r.firstSeenAt || '', r.lastSeenAt || '',
     ];
   });
 
@@ -92,12 +84,12 @@ function writeRequisitionsTab_(adpInfo, reqs) {
   sheet.setFrozenRows(1);
 }
 
-/** Emails one digest; acks all pending rows (incl. ones with no IT needs) only after success. Returns a status string. */
-function emailPendingAlerts_(pending) {
+/** Emails one digest; acks all pending rows (incl. titles not on the IT list) only after success. Returns a status string. */
+function emailPendingAlerts_(pending, isItTitle) {
   if (pending.length === 0) return 'No new alerts.';
 
   const toEmail = pending.filter(function (r) {
-    return REQ_LISTED_STATUSES.indexOf(r.status) !== -1 && hasItRelevance_(r);
+    return REQ_LISTED_STATUSES.indexOf(r.status) !== -1 && isItTitle(r);
   });
 
   if (toEmail.length > 0) {
@@ -156,24 +148,11 @@ function buildDigestItem_(r) {
     `Replacement: ${r.isBackfill ? 'yes' : 'no'}`,
   ];
   if (r.hiringManager) lines.push(`Hiring manager: ${e(r.hiringManager)}`);
-  lines.push(`<b>IT needs:</b> ${e(formatNeeds_(r))}`);
   return lines.join('<br>');
-}
-
-function hasItRelevance_(r) {
-  return r.itNeeds === null || r.itNeeds.length > 0;
-}
-
-function formatNeeds_(r) {
-  return r.itNeeds === null ? REQ_UNMAPPED : r.itNeeds.join(', ');
 }
 
 function normalizeTitle_(t) {
   return String(t || '').trim().toLowerCase();
-}
-
-function isChecked_(v) {
-  return v === true || ['y', 'yes', 'x', 'true'].indexOf(String(v).trim().toLowerCase()) !== -1;
 }
 
 function escapeHtmlReq_(s) {
