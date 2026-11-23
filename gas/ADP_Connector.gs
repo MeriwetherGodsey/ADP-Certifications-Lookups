@@ -6,6 +6,7 @@ function onOpen() {
   ui.createMenu('Manually Update ADP')
     .addItem('Refresh Roster from ADP (slow)', 'refreshRosterFromADP')
     .addItem('Refresh Certifications from ADP (slow)', 'refreshCertsFromADP')
+    .addItem('Refresh Open Requisitions', 'refreshRequisitions')
     .addSeparator()
     .addItem('Update Roster', 'allActiveEmployees')
     .addSeparator()

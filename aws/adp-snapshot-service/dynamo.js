@@ -8,6 +8,7 @@ const {
   BatchGetCommand,
   ScanCommand,
   DeleteCommand,
+  UpdateCommand,
 } = require('@aws-sdk/lib-dynamodb');
 
 const REGION = process.env.AWS_REGION || 'us-east-1';
@@ -19,6 +20,7 @@ const ddb = DynamoDBDocumentClient.from(new DynamoDBClient({ region: REGION }), 
 
 const ROSTER_TABLE = process.env.ROSTER_TABLE || 'adp_roster_latest';
 const CERTS_TABLE  = process.env.CERTS_TABLE  || 'adp_associate_certs_latest';
+const REQUISITIONS_TABLE = process.env.REQUISITIONS_TABLE || 'adp_requisitions_latest';
 
 /** =======================
  *  Batch write helper
@@ -112,12 +114,23 @@ async function scanAllRosterAoids() {
  *  Scan all roster items (for getRoster)
  *  ======================= */
 async function scanAllRoster() {
+  return scanAll(ROSTER_TABLE);
+}
+
+/** =======================
+ *  Scan all requisition items (for ingestRequisitions diff + getRequisitions)
+ *  ======================= */
+async function scanAllRequisitions() {
+  return scanAll(REQUISITIONS_TABLE);
+}
+
+async function scanAll(tableName) {
   const items = [];
   let lastKey = undefined;
 
   do {
     const resp = await ddb.send(new ScanCommand({
-      TableName:         ROSTER_TABLE,
+      TableName:         tableName,
       ExclusiveStartKey: lastKey,
     }));
     items.push(...(resp.Items || []));
@@ -125,6 +138,32 @@ async function scanAllRoster() {
   } while (lastKey);
 
   return items;
+}
+
+/** =======================
+ *  Clear pending alerts after GAS has emailed them
+ *  acks: [{ itemID, pendingAlertAt }]
+ *  Conditional on pendingAlertAt so an alert raised after the email was built is not cleared.
+ *  Returns the number of rows actually cleared.
+ *  ======================= */
+async function clearPendingAlerts(acks) {
+  let cleared = 0;
+  for (const { itemID, pendingAlertAt } of acks) {
+    try {
+      await ddb.send(new UpdateCommand({
+        TableName:                 REQUISITIONS_TABLE,
+        Key:                       { itemID },
+        UpdateExpression:          'REMOVE pendingAlert, pendingAlertAt, prevStatusName',
+        ConditionExpression:       'pendingAlertAt = :at',
+        ExpressionAttributeValues: { ':at': pendingAlertAt },
+      }));
+      cleared++;
+    } catch (err) {
+      if (err?.name !== 'ConditionalCheckFailedException') throw err;
+      console.log(`[dynamo] Skipped ack for ${itemID} — pendingAlertAt changed or already cleared`);
+    }
+  }
+  return cleared;
 }
 
 /** =======================
@@ -161,9 +200,12 @@ function sleep(ms) {
 module.exports = {
   ROSTER_TABLE,
   CERTS_TABLE,
+  REQUISITIONS_TABLE,
   batchWrite,
   batchDelete,
   batchGet,
   scanAllRosterAoids,
   scanAllRoster,
+  scanAllRequisitions,
+  clearPendingAlerts,
 };
