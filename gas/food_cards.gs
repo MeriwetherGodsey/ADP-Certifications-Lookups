@@ -470,6 +470,17 @@ function getPhiladelphiaFoodCardCerts() {
     ['City of Philadelphia Food Card'], 'City of Philadelphia Food Card');
 }
 
+function getGSFoodCardCerts() {
+  var roster = retrieveRoster();
+  var fpmJobDescriptions = getJobDescriptionsByCategory('FPM');
+  var bsfscAccounts = getRegionalDataByFilter('BC-FSC Accounts');
+  var fpmEmployees = _.filter(roster.employees, (v) => _.includes(fpmJobDescriptions, v.jobTitle));
+  var bcfscFoodCardEmployees = _.filter(fpmEmployees, (v) => _.includes(bsfscAccounts, v.account));
+  console.log(`BC-FSC FoodCard Employees: ` + bcfscFoodCardEmployees.length);
+  writeFoodCardSheet_('BC-FSC Food Cards', bcfscFoodCardEmployees,
+    ['BC-FSC Food Card'], 'BC-FSC Food Card');
+}
+
 /** =========================
  *  Shared food card sheet writer
  *  employees: array of { name, aoid, account, jobTitle }

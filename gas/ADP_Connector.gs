@@ -22,6 +22,7 @@ function onOpen() {
     .addItem('Update MoCo MD Food Cards', 'getMocoFoodCardCerts')
     .addItem('Update MoCo PA Food Cards', 'getMocoPaFoodCardCerts')
     .addItem('Update Philadelphia Food Cards', 'getPhiladelphiaFoodCardCerts')
+    .addItem('Update BC-FSC Food Cards', 'getGSFoodCardCerts')
     .addItem('Update PROD 101', 'updateProd101')
     .addItem('Update CHEF 101', 'updateChef101')
     .addItem('Update DIR 101', 'updateDir101')
@@ -351,7 +352,7 @@ function lookupSingleEmployeeCertifications(aoid) {
 
 
 function lookupOneEmployeeByAoid() {
-  var empAoid = "010NT663K0K011XK";
+  var empAoid = "G3NSXJ1S0H4AVCSD";
   // var empAoid = "G3KE0P6CXQ2NXFZQ";
   var empCerts = lookupSingleEmployeeCertifications(empAoid);
   var empData = empCerts.data.associateCertifications;
