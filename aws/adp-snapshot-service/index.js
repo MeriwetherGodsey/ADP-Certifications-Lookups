@@ -8,19 +8,25 @@ const {
   verifySlackSignature, respondToSlack,
 } = require('./slack');
 const {
-  ROSTER_TABLE, CERTS_TABLE,
+  ROSTER_TABLE, CERTS_TABLE, REQUISITIONS_TABLE,
   batchWrite, batchDelete, batchGet,
   scanAllRosterAoids, scanAllRoster,
+  scanAllRequisitions, clearPendingAlerts,
 } = require('./dynamo');
+const { fetchAllRequisitions, mapRequisition, diffRequisitions } = require('./requisitions');
 
 /** =======================
  *  Lambda handler — routes by event.action
  *
  *  Supported actions:
- *    ingestRoster  — fetch all workers from ADP → store in adp_roster_latest
- *    ingestCerts   — read AOIDs from adp_roster_latest → fetch all certs → store in adp_associate_certs_latest
- *    getRoster     — return all roster rows from adp_roster_latest
- *    getCerts      — return cert rows for provided AOIDs from adp_associate_certs_latest
+ *    ingestRoster          — fetch all workers from ADP → store in adp_roster_latest
+ *    ingestCerts           — read AOIDs from adp_roster_latest → fetch all certs → store in adp_associate_certs_latest
+ *    getRoster             — return all roster rows from adp_roster_latest
+ *    getCerts              — return cert rows for provided AOIDs from adp_associate_certs_latest
+ *    ingestRequisitions    — fetch job requisitions from ADP → diff → store in adp_requisitions_latest
+ *                            with pendingAlert set on new / reopened / new-on-hold rows ({ seed, dryRun } supported)
+ *    getRequisitions       — return requisition rows (optional { status: 'ON' } filter)
+ *    ackRequisitionAlerts  — clear pendingAlert on rows GAS has emailed ({ acks: [{ itemID, pendingAlertAt }] })
  *
  *  EventBridge scheduled events should include { "action": "ingestRoster" } etc.
  *  GAS calls should POST { "action": "getRoster" } or { "action": "getCerts", "aoids": [...] }
@@ -32,10 +38,12 @@ exports.handler = async (event) => {
   }
 
   // Shared secret check for Function URL calls (EventBridge bypasses this — no headers)
+  // Fails closed: if FUNCTION_URL_SECRET is unset, all HTTP calls are rejected
   if (event?.headers) {
     const expected = process.env.FUNCTION_URL_SECRET;
     const provided = event?.headers?.['x-adp-secret'];
-    if (expected && provided !== expected) {
+    if (!expected || provided !== expected) {
+      if (!expected) console.error('[handler] FUNCTION_URL_SECRET is not set — rejecting HTTP request');
       return { statusCode: 401, error: 'Unauthorized' };
     }
   }
@@ -62,6 +70,9 @@ exports.handler = async (event) => {
       case 'ingestCerts':  return respond(await ingestCerts({ aoids: body?.aoids, requestedBy: body?.requestedBy }));
       case 'getRoster':    return respond(await getRoster());
       case 'getCerts':     return respond(await getCerts(body?.aoids));
+      case 'ingestRequisitions':   return respond(await ingestRequisitions({ seed: body?.seed === true, dryRun: body?.dryRun === true }));
+      case 'getRequisitions':      return respond(await getRequisitions({ status: body?.status }));
+      case 'ackRequisitionAlerts': return respond(await ackRequisitionAlerts(body?.acks));
       default:
         console.warn(`[handler] Unknown action: ${action}`);
         return respond({ statusCode: 400, error: `Unknown action: ${action}` });
@@ -401,6 +412,87 @@ async function getCerts(aoids) {
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
   console.log(`[getCerts] Returned ${items.length}/${aoids.length} items in ${elapsed}s`);
   return { statusCode: 200, certs: byAoid, count: items.length };
+}
+
+/** =======================
+ *  ingestRequisitions
+ *  Fetches all job requisitions (every status) from ADP, diffs against adp_requisitions_latest,
+ *  and marks rows with pendingAlert for GAS to email IT. Rows missing from ADP are kept as-is.
+ *  seed (or empty table) → write without alerts. dryRun → no writes; returns would-be alerts.
+ *  ======================= */
+async function ingestRequisitions({ seed = false, dryRun = false } = {}) {
+  const t0    = Date.now();
+  const token = await getBearerToken();
+  const now   = new Date().toISOString();
+
+  const fresh = (await fetchAllRequisitions(token)).map((r) => mapRequisition(r, now));
+  if (fresh.length === 0) {
+    console.warn('[ingestRequisitions] ADP returned 0 requisitions — table NOT updated');
+    if (!dryRun) await notifyFailure('ingestRequisitions', { 'Warning': 'ADP returned 0 requisitions — table NOT updated' });
+    return { statusCode: 200, message: 'No requisitions found', counts: { fetched: 0 } };
+  }
+
+  const existing   = await scanAllRequisitions();
+  const isSeed     = seed || existing.length === 0;
+  const existingById = new Map(existing.map((e) => [e.itemID, e]));
+  const { rows, alerts, counts } = diffRequisitions(fresh, existingById, now, { seed: isSeed });
+  const elapsed    = ((Date.now() - t0) / 1000).toFixed(1);
+  const summary    = `fetched=${counts.fetched} new=${counts.new} reopened=${counts.reopened} onHold=${counts.onHold} updated=${counts.updated} seed=${isSeed}`;
+
+  if (dryRun) {
+    console.log(`[ingestRequisitions] DRY RUN ${summary} in ${elapsed}s`);
+    for (const a of alerts) {
+      console.log(`[ingestRequisitions] DRY RUN would alert ${a.pendingAlert}: req ${a.reqNumber} ${a.jobTitle} @ ${a.account} (${a.status})`);
+    }
+    return { statusCode: 200, dryRun: true, seed: isSeed, counts, alerts, sample: rows.slice(0, 3), elapsed };
+  }
+
+  await batchWrite(REQUISITIONS_TABLE, rows);
+
+  console.log(`[ingestRequisitions] Done. ${summary} in ${elapsed}s`);
+  await notifySuccess('ingestRequisitions', {
+    'Fetched':       counts.fetched,
+    'New':           counts.new,
+    'Reopened':      counts.reopened,
+    'On hold (new)': counts.onHold,
+    'Updated':       counts.updated,
+    'Pending alerts': alerts.length,
+    ...(isSeed ? { 'Seed': 'yes — no alerts raised' } : {}),
+    'Elapsed':       `${elapsed}s`,
+  });
+  return { statusCode: 200, message: 'Requisition ingest complete', seed: isSeed, counts, pendingAlerts: alerts.length, elapsed };
+}
+
+/** =======================
+ *  getRequisitions
+ *  Returns all rows from adp_requisitions_latest, optionally filtered by status code (e.g. 'ON')
+ *  Filtered in memory — `status` is a DynamoDB reserved word and the table is small.
+ *  ======================= */
+async function getRequisitions({ status } = {}) {
+  const t0    = Date.now();
+  const all   = await scanAllRequisitions();
+  const want  = status ? String(status).trim().toUpperCase() : '';
+  const items = want ? all.filter((r) => r.status === want) : all;
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
+  console.log(`[getRequisitions] Returned ${items.length}/${all.length} items${want ? ` (status=${want})` : ''} in ${elapsed}s`);
+  return { statusCode: 200, requisitions: items, count: items.length };
+}
+
+/** =======================
+ *  ackRequisitionAlerts
+ *  Clears pendingAlert on rows GAS has successfully emailed
+ *  acks: [{ itemID, pendingAlertAt }]
+ *  ======================= */
+async function ackRequisitionAlerts(acks) {
+  const valid = Array.isArray(acks)
+    ? acks.filter((a) => a?.itemID && a?.pendingAlertAt).map((a) => ({ itemID: String(a.itemID), pendingAlertAt: String(a.pendingAlertAt) }))
+    : [];
+  if (valid.length === 0) {
+    return { statusCode: 400, error: 'acks must be a non-empty array of { itemID, pendingAlertAt }' };
+  }
+  const acked = await clearPendingAlerts(valid);
+  console.log(`[ackRequisitionAlerts] Cleared ${acked}/${valid.length} pending alerts`);
+  return { statusCode: 200, acked };
 }
 
 /** =======================
