@@ -416,8 +416,9 @@ async function getCerts(aoids) {
 
 /** =======================
  *  ingestRequisitions
- *  Fetches all job requisitions (every status) from ADP, diffs against adp_requisitions_latest,
- *  and marks rows with pendingAlert for GAS to email IT. Rows missing from ADP are kept as-is.
+ *  Fetches Open (ON) and On Hold (OH) job requisitions from ADP, diffs against adp_requisitions_latest,
+ *  and marks rows with pendingAlert for GAS to email IT. Stored ON/OH rows that ADP no longer returns
+ *  are kept as history with status NO_LONGER_OPEN.
  *  seed (or empty table) → write without alerts. dryRun → no writes; returns would-be alerts.
  *  ======================= */
 async function ingestRequisitions({ seed = false, dryRun = false } = {}) {
@@ -427,8 +428,8 @@ async function ingestRequisitions({ seed = false, dryRun = false } = {}) {
 
   const fresh = (await fetchAllRequisitions(token)).map((r) => mapRequisition(r, now));
   if (fresh.length === 0) {
-    console.warn('[ingestRequisitions] ADP returned 0 requisitions — table NOT updated');
-    if (!dryRun) await notifyFailure('ingestRequisitions', { 'Warning': 'ADP returned 0 requisitions — table NOT updated' });
+    console.warn('[ingestRequisitions] ADP returned 0 open/on-hold requisitions — table NOT updated');
+    if (!dryRun) await notifyFailure('ingestRequisitions', { 'Warning': 'ADP returned 0 open/on-hold requisitions — table NOT updated' });
     return { statusCode: 200, message: 'No requisitions found', counts: { fetched: 0 } };
   }
 
@@ -437,7 +438,7 @@ async function ingestRequisitions({ seed = false, dryRun = false } = {}) {
   const existingById = new Map(existing.map((e) => [e.itemID, e]));
   const { rows, alerts, counts } = diffRequisitions(fresh, existingById, now, { seed: isSeed });
   const elapsed    = ((Date.now() - t0) / 1000).toFixed(1);
-  const summary    = `fetched=${counts.fetched} new=${counts.new} reopened=${counts.reopened} onHold=${counts.onHold} updated=${counts.updated} seed=${isSeed}`;
+  const summary    = `fetched=${counts.fetched} new=${counts.new} reopened=${counts.reopened} onHold=${counts.onHold} updated=${counts.updated} noLongerOpen=${counts.noLongerOpen} seed=${isSeed}`;
 
   if (dryRun) {
     console.log(`[ingestRequisitions] DRY RUN ${summary} in ${elapsed}s`);
@@ -456,6 +457,7 @@ async function ingestRequisitions({ seed = false, dryRun = false } = {}) {
     'Reopened':      counts.reopened,
     'On hold (new)': counts.onHold,
     'Updated':       counts.updated,
+    'No longer open': counts.noLongerOpen,
     'Pending alerts': alerts.length,
     ...(isSeed ? { 'Seed': 'yes — no alerts raised' } : {}),
     'Elapsed':       `${elapsed}s`,

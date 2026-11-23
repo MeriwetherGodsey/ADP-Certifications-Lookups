@@ -3,48 +3,71 @@
 const { adpGet } = require('./adp');
 
 const PAGE_SIZE = 20; // ADP caps job-requisitions at 20 per call
+const MAX_PAGES = 50; // per status — guards against runaway paging
+
+// ADP holds every historical requisition (2.5k+, ~6 min to page through), so only fetch the statuses we
+// alert on. Both are fetched so OH → ON can still be detected. Separate calls avoid relying on `or` support.
+const OPEN_STATUSES      = ['ON', 'OH'];
+const NO_LONGER_OPEN     = 'NO_LONGER_OPEN';
+const NO_LONGER_OPEN_NAME = 'No longer open';
 
 /** =======================
  *  fetchAllRequisitions
- *  Pages through /staffing/v1/job-requisitions (all statuses — no filter, so OH → ON can be detected).
- *  Throws on any non-200/204 page so a partial fetch is never committed.
+ *  Pages through /staffing/v1/job-requisitions once per status in OPEN_STATUSES.
+ *  Throws on any non-200/204 page, on hitting MAX_PAGES, or if ADP ignores $skip, so an incomplete
+ *  fetch is never committed (it would otherwise wrongly mark missing requisitions as no longer open).
  *  Never logs response bodies (they contain pay, descriptions, and departing-employee names).
  *  ======================= */
 async function fetchAllRequisitions(token) {
+  const byId = new Map();
+  for (const status of OPEN_STATUSES) {
+    await fetchByStatus(token, status, byId);
+  }
+  console.log(`[requisitions] Fetched ${byId.size} open/on-hold requisitions`);
+  return [...byId.values()];
+}
+
+async function fetchByStatus(token, status, byId) {
+  const filter = `requisitionStatusCode/codeValue eq '${status}'`.replace(/ /g, '%20');
   let skip    = 0;
   let total   = null;
   let pageNum = 0;
-  const byId  = new Map();
+  let added   = 0;
 
   while (true) {
-    pageNum++;
-    const uri = pageNum === 1
-      ? `/staffing/v1/job-requisitions?count=true&$top=${PAGE_SIZE}&$skip=${skip}`
-      : `/staffing/v1/job-requisitions?$top=${PAGE_SIZE}&$skip=${skip}`;
+    if (++pageNum > MAX_PAGES) {
+      throw new Error(`ADP job-requisitions status=${status} exceeded ${MAX_PAGES} pages — aborting`);
+    }
+    const uri = `/staffing/v1/job-requisitions?$filter=${filter}${pageNum === 1 ? '&count=true' : ''}&$top=${PAGE_SIZE}&$skip=${skip}`;
 
     const result = await adpGet(token, 'https://api.adp.com', uri);
     if (result.statusCode === 204) break;
     if (result.statusCode !== 200 || !result.data) {
-      throw new Error(`ADP job-requisitions returned ${result.statusCode} at skip=${skip}`);
+      throw new Error(`ADP job-requisitions status=${status} returned ${result.statusCode} at skip=${skip}`);
     }
 
     if (pageNum === 1) {
       total = result.data?.meta?.totalNumber ?? null;
-      console.log(`[requisitions] totalCount=${total}`);
+      console.log(`[requisitions] status=${status} totalCount=${total}`);
     }
 
-    const page = result.data.jobRequisitions || [];
+    const page  = result.data.jobRequisitions || [];
+    let newHere = 0;
     for (const raw of page) {
+      if (raw?.itemID && !byId.has(raw.itemID)) newHere++;
       if (raw?.itemID) byId.set(raw.itemID, raw);
     }
+    if (page.length === PAGE_SIZE && newHere === 0) {
+      throw new Error(`ADP job-requisitions status=${status} returned a full page with no new items at skip=${skip} — $skip may be ignored`);
+    }
+    added += newHere;
 
     skip += PAGE_SIZE;
     if (page.length < PAGE_SIZE) break;
     if (total != null && skip >= total) break;
   }
 
-  console.log(`[requisitions] Fetched ${byId.size} requisitions in ${pageNum} page(s)`);
-  return [...byId.values()];
+  console.log(`[requisitions] status=${status} fetched ${added} in ${pageNum} page(s)`);
 }
 
 /** =======================
@@ -79,9 +102,10 @@ function mapRequisition(raw, fetchedAt) {
 
 /** =======================
  *  diffRequisitions
- *  fresh: mapped requisitions from ADP; existingById: Map(itemID → stored row)
- *  Returns { rows, alerts, counts }. rows are full items to Put; requisitions missing from ADP are
- *  not included, so their stored row (and lastSeenAt) is left untouched.
+ *  fresh: mapped ON/OH requisitions from ADP; existingById: Map(itemID → stored row)
+ *  Returns { rows, alerts, counts }. rows are full items to Put. A stored ON/OH row that ADP no longer
+ *  returns is rewritten as status NO_LONGER_OPEN with its lastSeenAt untouched (kept as history), so
+ *  the tab stops listing it and a later reopen is detected as 'reopened'.
  *
  *  pendingAlert values:
  *    new      — first seen with status ON
@@ -93,7 +117,7 @@ function mapRequisition(raw, fetchedAt) {
 function diffRequisitions(fresh, existingById, now, { seed = false } = {}) {
   const rows   = [];
   const alerts = [];
-  const counts = { fetched: fresh.length, new: 0, reopened: 0, onHold: 0, updated: 0 };
+  const counts = { fetched: fresh.length, new: 0, reopened: 0, onHold: 0, updated: 0, noLongerOpen: 0 };
 
   for (const f of fresh) {
     const prev = existingById.get(f.itemID);
@@ -116,6 +140,13 @@ function diffRequisitions(fresh, existingById, now, { seed = false } = {}) {
     }
 
     rows.push(row);
+  }
+
+  const freshIds = new Set(fresh.map((f) => f.itemID));
+  for (const prev of existingById.values()) {
+    if (freshIds.has(prev.itemID) || !OPEN_STATUSES.includes(prev.status)) continue;
+    rows.push({ ...prev, status: NO_LONGER_OPEN, statusName: NO_LONGER_OPEN_NAME, fetchedAt: now });
+    counts.noLongerOpen++;
   }
 
   return { rows, alerts, counts };
