@@ -56,8 +56,14 @@ Set in AWS Console → Lambda → adp-snapshot-service → Configuration → Env
 | `SLACK_WEBHOOK_URL` | Slack app incoming webhook URL |
 | `SLACK_SIGNING_SECRET` | Slack app signing secret — verifies "Retry failed AOIDs" button clicks |
 | `FUNCTION_URL_SECRET` | Shared secret GAS sends in `x-adp-secret` |
+| `FUNCTION_URL_SECRET_LETTERS` | Optional second `x-adp-secret` for the Letters app (Render env `ADP_SNAPSHOT_SECRET`); limited to `getRoster` |
 | `CERT_CONCURRENCY` | Parallel ADP cert requests (default `4`) |
 | `REQUISITIONS_TABLE` | DynamoDB table for job requisitions (default `adp_requisitions_latest`) |
+
+HTTP calls with no secret configured, or a missing/wrong `x-adp-secret`, get `401`. A Letters-secret call for any action other than `getRoster` gets `403`.
+
+#### Roster fields
+`getRoster` returns one item per AOID: `aoid`, `name` ("Last, First" — used by GAS), `givenName`, `familyName` (preferred name, else legal), `account`, `accountName` (home work location long name, else short name, else `''`), `jobTitle`, `positionId`, `associateId`, `originalHireDate`, `positionStartDate`, `fetchedAt`. GAS maps fields by name, so new fields don't affect the Roster tab.
 
 #### Slack "Retry failed AOIDs" button
 When `ingestCerts` still has failures after its internal retries, the Slack alert includes a button that re-runs `ingestCerts` for just the failed AOIDs (no need to open the sheet). One-time setup:
