@@ -42,7 +42,7 @@ Lambda functions are deployed automatically via GitHub Actions on push to `main`
 **Required GitHub Secrets:**
 - `AWS_ACCESS_KEY_ID`
 - `AWS_SECRET_ACCESS_KEY`
-- `ADP_CERT` / `ADP_KEY` — mTLS cert/key for adp-snapshot-service
+- `MG_CERT_B64` / `MG_KEY_B64` — base64-encoded mTLS cert/key for adp-snapshot-service (decoded into `keys/` at deploy time)
 
 ---
 
@@ -86,3 +86,29 @@ IT gets an email digest when a job requisition opens in ADP, so equipment and ac
 | `SLACK_WEBHOOK` | Slack incoming webhook URL |
 | `COMPLETION_AFTER` | Date filter cutoff in `YYYY-MM-DD` format (e.g. `2024-06-01`) |
 | `EXEMPT_COURSE_CODES` | Comma-separated course codes to always include regardless of date (e.g. `INS 123,INS 137`) |
+
+---
+
+## Rotating the ADP mTLS Cert
+
+The cert/key are never committed (`**/keys/` is gitignored). Each Lambda reads them from its own `keys/` folder:
+- `keys/Meriwether Godsey, Inc..cer`
+- `keys/meriwethergodsey_auth.key` — only changes if ADP issued the cert against a new CSR/private key
+
+Files must be PEM (text starting with `-----BEGIN ...`). If ADP sends a binary DER `.cer`, convert it first: `openssl x509 -inform der -in new.cer -out new.pem`.
+
+### adp-snapshot-service
+1. **Live fix:** AWS Console → Lambda → adp-snapshot-service → Code → `keys/` → paste the new cert over `Meriwether Godsey, Inc..cer` (keep the filename) → **Deploy**.
+2. **Persist for future deploys** — otherwise the next GitHub Actions deploy restores the old cert from secrets:
+   ```bash
+   base64 -i "/path/to/new/Meriwether Godsey, Inc..cer" | tr -d '\n' \
+     | gh secret set MG_CERT_B64 -R MeriwetherGodsey/ADP-Certifications-Lookups
+   # only if the key changed:
+   base64 -i "/path/to/new/meriwethergodsey_auth.key" | tr -d '\n' \
+     | gh secret set MG_KEY_B64 -R MeriwetherGodsey/ADP-Certifications-Lookups
+   ```
+   Confirm with `gh secret list -R MeriwetherGodsey/ADP-Certifications-Lookups` (updated date should be today).
+3. **Verify:** Sheet → **Manually Update ADP → Refresh Roster from ADP**.
+
+### adp-api-node (legacy)
+No CI deploy. Paste the new cert into its `keys/` folder in the Lambda console → **Deploy**. Test with `testHUListEmployees` in Apps Script.
