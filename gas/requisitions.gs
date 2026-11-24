@@ -65,12 +65,12 @@ function loadItTitles_(adpInfo) {
 function writeRequisitionsTab_(adpInfo, reqs) {
   const sheet = adpInfo.getSheetByName(REQ_LISTING_SHEET) || adpInfo.insertSheet(REQ_LISTING_SHEET);
   const header = ['Req #', 'Status', 'Job Title', 'Account', 'Account Name', 'Worker Type', 'Openings',
-    'Projected Start', 'Replacement', 'Hiring Manager', 'First Seen', 'Last Seen'];
+    'Posted', 'Projected Start', 'Replacement', 'Hiring Manager', 'First Seen', 'Last Seen'];
 
   const rows = sortByStart_(reqs).map(function (r) {
     return [
       r.reqNumber || '', r.statusName || r.status || '', r.jobTitle || '', r.account || '', r.accountName || '',
-      r.workerType || '', r.openings || 0, r.projectedStartDate || '', r.isBackfill ? 'Y' : 'N',
+      r.workerType || '', r.openings || 0, r.postedDate || '', r.projectedStartDate || '', r.isBackfill ? 'Y' : 'N',
       r.hiringManager || '', r.firstSeenAt || '', r.lastSeenAt || '',
     ];
   });
@@ -143,11 +143,11 @@ function buildDigestHtml_(updates, relevant) {
 function buildRequisitionsTable_(reqs) {
   const e    = escapeHtmlReq_;
   const cell = 'style="border:1px solid #ccc;padding:4px 8px;text-align:left"';
-  const head = ['Req #', 'Status', 'Job Title', 'Account', 'Projected Start', 'Hiring Manager'];
+  const head = ['Req #', 'Status', 'Job Title', 'Account', 'Posted', 'Projected Start', 'Hiring Manager'];
   const rows = sortByStart_(reqs).map(function (r) {
     return '<tr>' + [
       r.reqNumber, r.statusName || r.status, r.jobTitle, `${r.accountName || ''} (${r.account || ''})`,
-      r.projectedStartDate || 'n/a', r.hiringManager,
+      r.postedDate || 'n/a', r.projectedStartDate || 'n/a', r.hiringManager,
     ].map(function (v) { return `<td ${cell}>${e(v)}</td>`; }).join('') + '</tr>';
   });
   return `<table style="border-collapse:collapse;font-size:13px"><tr>` +
@@ -166,7 +166,7 @@ function buildDigestItem_(r) {
   const lines = [
     `<b>${e(r.jobTitle)}</b> at ${e(r.accountName)} (${e(r.account)})${was}`,
     `Req #${e(r.reqNumber)} · ${e(r.workerType || 'Worker type n/a')} · ${r.openings || 0} opening(s)`,
-    `Projected start: ${e(r.projectedStartDate || 'n/a')}`,
+    `Posted: ${e(r.postedDate || 'n/a')} · Projected start: ${e(r.projectedStartDate || 'n/a')}`,
     `Replacement: ${r.isBackfill ? 'yes' : 'no'}`,
   ];
   if (r.hiringManager) lines.push(`Hiring manager: ${e(r.hiringManager)}`);
