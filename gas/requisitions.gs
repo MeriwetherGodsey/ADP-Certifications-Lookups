@@ -211,11 +211,11 @@ function dryRunRequisitions() {
   });
 }
 
-/** Daily ~7am (script timezone America/New_York). Removes existing triggers for this handler first. */
+/** Daily ~5pm (script timezone America/New_York; Apps Script runs it sometime in the 5–6pm hour). Removes existing triggers for this handler first. */
 function createDailyRequisitionsTrigger() {
   ScriptApp.getProjectTriggers().forEach(function (t) {
     if (t.getHandlerFunction() === 'refreshRequisitions') ScriptApp.deleteTrigger(t);
   });
-  ScriptApp.newTrigger('refreshRequisitions').timeBased().everyDays(1).atHour(7).create();
-  reqAlert_('Daily trigger created: refreshRequisitions will run every day at ~7am.');
+  ScriptApp.newTrigger('refreshRequisitions').timeBased().everyDays(1).atHour(17).create();
+  reqAlert_('Daily trigger created: refreshRequisitions will run every day at ~5pm.');
 }
