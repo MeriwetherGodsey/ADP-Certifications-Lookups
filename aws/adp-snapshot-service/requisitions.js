@@ -93,6 +93,7 @@ function mapRequisition(raw, fetchedAt) {
     workerType:         str(raw?.workerTypeCode?.shortName) || str(raw?.workerTypeCode?.longName),
     openings:           Math.max(0, quantity - filled),
     projectedStartDate: str(raw?.projectedStartDate),
+    postedDate:         postedDate(raw),
     reason:             str(raw?.requisitionReasonCode?.shortName),
     isBackfill:         Array.isArray(raw?.backfillWorkerPositions) && raw.backfillWorkerPositions.length > 0,
     hiringManager:      str(raw?.hiringManager?.personName?.formattedName),
@@ -162,6 +163,17 @@ function classify(f, prev) {
   // Never emailed yet (still pending as new/onHold) → it's still news, so report as new
   if (prev.pendingAlert === 'new' || prev.pendingAlert === 'onHold') return { kind: 'new' };
   return { kind: 'reopened', prevStatusName: prev.statusName || prev.status || '' };
+}
+
+/** Top-level postDate if present, else the earliest postingInstructions[].postDate; date part only (YYYY-MM-DD). */
+function postedDate(raw) {
+  const toDate = (d) => {
+    const s = str(d).slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+  };
+  const top = toDate(raw?.postDate);
+  if (top) return top;
+  return (raw?.postingInstructions || []).map((p) => toDate(p?.postDate)).filter(Boolean).sort()[0] || '';
 }
 
 function str(v) {
