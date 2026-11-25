@@ -30,7 +30,11 @@ const { fetchAllRequisitions, mapRequisition, diffRequisitions } = require('./re
  *
  *  EventBridge scheduled events should include { "action": "ingestRoster" } etc.
  *  GAS calls should POST { "action": "getRoster" } or { "action": "getCerts", "aoids": [...] }
+ *  The Letters app (separate repo on Render) POSTs { "action": "getRoster" } with its own secret
+ *  (FUNCTION_URL_SECRET_LETTERS) and is limited to getRoster.
  *  ======================= */
+const LETTERS_ALLOWED_ACTIONS = new Set(['getRoster']);
+
 exports.handler = async (event) => {
   // Slack interactivity (button clicks) — authenticated by Slack signing secret instead of x-adp-secret
   if (event?.headers?.['x-slack-signature']) {
@@ -38,20 +42,28 @@ exports.handler = async (event) => {
   }
 
   // Shared secret check for Function URL calls (EventBridge bypasses this — no headers)
-  // Fails closed: if FUNCTION_URL_SECRET is unset, all HTTP calls are rejected
+  // Fails closed: if no secret is configured, all HTTP calls are rejected
+  let caller = null;
   if (event?.headers) {
-    const expected = process.env.FUNCTION_URL_SECRET;
-    const provided = event?.headers?.['x-adp-secret'];
-    if (!expected || provided !== expected) {
-      if (!expected) console.error('[handler] FUNCTION_URL_SECRET is not set — rejecting HTTP request');
-      return { statusCode: 401, error: 'Unauthorized' };
-    }
+    const secrets = [
+      ['gas',     process.env.FUNCTION_URL_SECRET],
+      ['letters', process.env.FUNCTION_URL_SECRET_LETTERS],
+    ].filter(([, s]) => s);
+    const provided = event.headers['x-adp-secret'];
+    if (secrets.length === 0) console.error('[handler] No FUNCTION_URL_SECRET* is set — rejecting HTTP request');
+    caller = provided ? secrets.find(([, s]) => s === provided)?.[0] : undefined;
+    if (!caller) return { statusCode: 401, error: 'Unauthorized' };
   }
 
   const isHttp = !!event?.headers;
   const body   = event?.body ? JSON.parse(event.body) : event;
   const action = body?.action;
-  console.log(`[handler] action=${action} isHttp=${isHttp}`);
+  console.log(`[handler] action=${action} isHttp=${isHttp}${caller ? ` caller=${caller}` : ''}`);
+
+  if (caller === 'letters' && !LETTERS_ALLOWED_ACTIONS.has(action)) {
+    console.warn(`[handler] caller=letters not allowed action=${action}`);
+    return { statusCode: 403, error: 'Forbidden' };
+  }
 
   const respond = (result) => {
     if (isHttp) {
@@ -136,16 +148,24 @@ async function ingestRoster() {
       const name          = buildWorkerDisplayName(w);
       const associateId   = w?.workerID?.idValue || '';
       const originalHire  = w?.workerDates?.originalHireDate || '';
+      const preferred     = w?.person?.preferredName || {};
+      const legal         = w?.person?.legalName || {};
+      const givenName     = pick(preferred.givenName, legal.givenName);
+      const familyName    = pick(preferred.familyName1, legal.familyName1);
 
       for (const a of (w.workAssignments || [])) {
-        const status = a?.assignmentStatus?.statusCode?.codeValue;
-        const acct   = a?.homeWorkLocation?.nameCode?.codeValue;
+        const status   = a?.assignmentStatus?.statusCode?.codeValue;
+        const nameCode = a?.homeWorkLocation?.nameCode;
+        const acct     = nameCode?.codeValue;
         if (!acct || status !== 'A') continue;
 
         items.push({
           aoid,
           name,
+          givenName,
+          familyName,
           account:           acct,
+          accountName:       pick(nameCode?.longName, nameCode?.shortName),
           jobTitle:          a?.jobTitle || '',
           positionId:        a?.positionID || '',
           associateId,
@@ -504,14 +524,6 @@ function buildWorkerDisplayName(w) {
   const legal     = w?.person?.legalName || {};
   const preferred = w?.person?.preferredName || {};
 
-  const pick = (...vals) => {
-    for (const v of vals) {
-      const s = String(v ?? '').trim();
-      if (s) return s;
-    }
-    return '';
-  };
-
   const family    = pick(preferred.familyName1, legal.familyName1);
   const first     = pick(preferred.givenName, legal.givenName, preferred.nickName, legal.nickName);
   const formatted = pick(preferred.formattedName, legal.formattedName, preferred.fullName, legal.fullName);
@@ -520,6 +532,14 @@ function buildWorkerDisplayName(w) {
   if (formatted)       return formatted;
   if (family)          return family;
   return first;
+}
+
+function pick(...vals) {
+  for (const v of vals) {
+    const s = String(v ?? '').trim();
+    if (s) return s;
+  }
+  return '';
 }
 
 function summarizeStatusCodes(entries) {
